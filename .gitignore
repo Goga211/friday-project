@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Env / secrets
+.env
+*.local
+
+# Certs (generated locally, never commit)
+infra/certs/
+
+# Editor
+.idea/
+.vscode/
+*.swp

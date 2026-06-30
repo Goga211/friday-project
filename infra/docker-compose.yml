@@ -1,0 +1,18 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: christopher-mosquitto
+    ports:
+      - "1883:1883"   # MQTT (dev, plaintext)
+      - "8883:8883"   # MQTT over TLS (после настройки mTLS)
+      - "9001:9001"   # MQTT over WebSocket (мобильные/веб)
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./certs:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+    restart: unless-stopped
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
