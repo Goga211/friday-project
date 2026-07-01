@@ -36,6 +36,10 @@ REGISTRY_WILDCARD = f"{PREFIX}/registry/+"
 RESP_WILDCARD = f"{PREFIX}/resp/+"
 EVENT_WILDCARD = f"{PREFIX}/event/#"
 
+# Голосовой канал (для HUD/наблюдаемости): что услышали и что произносим.
+VOICE_TRANSCRIPT = f"{PREFIX}/voice/transcript"
+VOICE_SAY = f"{PREFIX}/voice/say"
+
 
 def device_from_registry_topic(topic: str) -> str:
     """Извлечь device_id из registry-топика."""

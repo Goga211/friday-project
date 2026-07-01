@@ -98,3 +98,19 @@ class AssistantReply(BaseModel):
     correlation_id: str  # id исходного UserMessage
     ts: datetime = Field(default_factory=_now)
     text: str
+
+
+class VoiceTranscript(BaseModel):
+    """Распознанная голосом фраза пользователя (для HUD/наблюдаемости)."""
+
+    id: str = Field(default_factory=_uuid)
+    ts: datetime = Field(default_factory=_now)
+    text: str
+
+
+class VoiceSay(BaseModel):
+    """Текст, который ассистент произносит голосом (для HUD/наблюдаемости)."""
+
+    id: str = Field(default_factory=_uuid)
+    ts: datetime = Field(default_factory=_now)
+    text: str

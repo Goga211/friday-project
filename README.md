@@ -12,7 +12,7 @@
 - **Агенты-исполнители** на устройствах (ПК/ноут/телефон) — выполняют команды, объявляют возможности.
 - Связь — **MQTT** (Mosquitto). Контракт сообщений — `src/christopher/shared/protocol.py`.
 
-## Статус: Phase 1 (в работе) — мозг (Claude tool-use)
+## Статус: Phase 2 (в работе) — голос
 
 Готово:
 - **Phase 0** — монорепо, протокол, шина, реестр устройств, ping/pong, Mosquitto в Docker.
@@ -21,6 +21,12 @@
   Текстовый CLI, аудит действий (SQLite), лимит шагов агентного цикла. Навыки агента (safe):
   ping, system_info, notify. Кросс-платформенный агент; реальные навыки управления (launch_app,
   run_command с allowlist, окна Win32/UIA) — следующий срез.
+- **Phase 2 (срез 1)** — голосовой агент на Hub'е: пайплайн wake-word → запись фразы →
+  облачный STT → мозг → TTS. Всё за swappable-интерфейсами (`SpeechProvider`/`WakeWord`/
+  `TTS`/аудио-I/O), реальные адаптеры — **openWakeWord**, **Yandex SpeechKit**, **Piper**,
+  **sounddevice**; фейки для тестов (пайплайн проверяется без микрофона и облака). Голос
+  переиспользует путь мозга (user/request → user/reply) и объявляет возможность `say`.
+  Живой прогон (микрофон + Yandex Cloud + обученная модель «Кристофер») — на стороне пользователя.
 
 ## Быстрый старт
 
@@ -45,6 +51,26 @@ make cli          # текстовый чат с Кристофером
 В CLI: `покажи инфо о системе` → Claude вызовет `system_info` на агенте и ответит.
 Без `ANTHROPIC_API_KEY` проверяется только обвязка (Core ответит «мозг недоступен»).
 
+### Голос (Phase 2)
+
+Голосовому агенту нужны системный **Piper** (бинарь + русский голос `.onnx`) и Python-extra:
+
+```bash
+make install-voice                       # ставит .[dev,voice] (openwakeword, sounddevice, numpy, httpx)
+# Piper — отдельно: https://github.com/rhasspy/piper (бинарь) + голос ru_RU (*.onnx)
+```
+
+Настрой `.env` (см. `.env.example`, блок `CHRISTOPHER_VOICE_`): ключ Yandex SpeechKit
+(`YANDEX_API_KEY`/`YANDEX_FOLDER_ID`), путь к голосу Piper (`PIPER_MODEL`) и к обученной
+модели wake-word (`WAKE_MODEL`). Затем:
+
+```bash
+make voice        # голосовой агент на Hub'е (нужен запущенный Core + брокер)
+```
+
+Скажи «Кристофер», задай вопрос — фраза уйдёт в STT → мозг → ответ голосом.
+Своя модель «Кристофер» для openWakeWord обучается отдельно (русское слово нужно тренировать).
+
 ## Разработка
 
 ```bash
@@ -62,6 +88,7 @@ src/christopher/
   core/       # Core/Hub: реестр устройств, оркестрация (мозг — в Phase 1)
   agents/
     desktop/  # тонкий агент-исполнитель (Linux+Windows)
+    voice/    # голосовой агент на Hub'е: wake→STT→мозг→TTS (за swappable-интерфейсами)
 infra/        # Mosquitto (docker-compose), конфиг, gen-certs (mTLS)
 tests/        # юнит-тесты протокола/топиков/диспатча
 docs/adr/     # архитектурные решения
