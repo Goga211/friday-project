@@ -15,6 +15,8 @@ install: venv
 
 install-voice: venv
 	$(PY) -m pip install -e ".[dev,voice]"
+	# openWakeWord отдельно с --no-deps: его tflite-runtime не собирается под py312, а мы на ONNX
+	$(PY) -m pip install "openwakeword>=0.6" --no-deps
 
 piper:
 	bash scripts/install-piper.sh
