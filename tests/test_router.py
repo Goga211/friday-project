@@ -126,3 +126,25 @@ async def test_safe_action_executes_even_with_pending_collector() -> None:
     out = await ToolRouter(reg, _caller).execute("ping", {}, pending)
     assert out["ok"] is True
     assert pending == []  # safe не требует подтверждения
+
+
+@pytest.mark.asyncio
+async def test_local_tool_registered_and_executed() -> None:
+    reg = DeviceRegistry()
+
+    async def _caller(dev: str, act: str, params: dict, confirm: bool) -> Response:
+        raise AssertionError("локальный инструмент не должен выходить на шину")
+
+    router = ToolRouter(reg, _caller)
+
+    async def _handler(params: dict) -> dict:
+        return {"echo": params.get("x")}
+
+    router.register_local(
+        Capability(name="list_actions", description="список", risk=RiskLevel.safe), _handler
+    )
+
+    assert any(t["name"] == "list_actions" for t in router.tool_definitions())
+    out = await router.execute("list_actions", {"x": 42})
+    assert out["ok"] is True
+    assert out["result"] == {"echo": 42}

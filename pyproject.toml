@@ -12,6 +12,8 @@ dependencies = [
     "anthropic>=0.40",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    "apscheduler>=3.10,<4",
+    "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -57,9 +59,9 @@ strict = true
 warn_unused_ignores = true
 plugins = ["pydantic.mypy"]
 
-# Опциональные аудио-зависимости без типовых стабов — игнорируем отсутствие стабов.
+# Зависимости без типовых стабов — игнорируем отсутствие стабов.
 [[tool.mypy.overrides]]
-module = ["openwakeword.*", "sounddevice", "numpy"]
+module = ["openwakeword.*", "sounddevice", "numpy", "apscheduler.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

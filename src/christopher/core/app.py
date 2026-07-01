@@ -18,16 +18,19 @@ from christopher.core.audit import AuditLog
 from christopher.core.brain import Brain
 from christopher.core.registry import DeviceRegistry
 from christopher.core.router import ToolRouter
+from christopher.core.scheduler import ActionScheduler, parse_when
 from christopher.shared.bus import Bus
 from christopher.shared.config import BusSettings
 from christopher.shared.logging import setup_logging
 from christopher.shared.protocol import (
     AssistantReply,
+    Capability,
     CapabilityManifest,
     Command,
     ConfirmDecision,
     PendingAction,
     Response,
+    RiskLevel,
     UserMessage,
 )
 from christopher.shared.topics import (
@@ -54,6 +57,7 @@ class Core:
         self._pending: dict[str, asyncio.Future[Response]] = {}
         # risky-действия, ждущие подтверждения: reply_id (=id UserMessage) → список действий
         self._pending_confirm: dict[str, list[PendingAction]] = {}
+        self._scheduler: ActionScheduler | None = None
         self._tasks: set[asyncio.Task[None]] = set()
 
         self.router = ToolRouter(self.registry, self._call_device, self.audit)
@@ -175,6 +179,125 @@ class Core:
                 "← resp от %s (cmd=%s) ОШИБКА: %s", resp.source, resp.correlation_id[:8], resp.error
             )
 
+    # --- планировщик (Scheduler): отложенные/повторяющиеся действия ---
+    async def _fire_scheduled(self, target: str, action: str, params: dict[str, object]) -> None:
+        """Срабатывание задачи: публикуем команду устройству (пользователь авторизовал при
+        планировании → requires_confirm=True). Fire-and-forget, ответа не ждём."""
+        cmd = Command(
+            source=CORE_ID, target=target, action=action, params=dict(params), requires_confirm=True
+        )
+        await self._bus_or_raise.publish_model(cmd_topic(target), cmd)
+
+    async def _tool_schedule_action(self, params: dict[str, object]) -> dict[str, object]:
+        target = str(params.get("target", "")).strip()
+        action = str(params.get("action", "")).strip()
+        if not target or not action:
+            raise ValueError("нужны параметры target и action")
+        payload = params.get("params") or {}
+        if not isinstance(payload, dict):
+            raise ValueError("params должен быть объектом")
+        delay_raw = params.get("delay_seconds")
+        at_raw = params.get("at")
+        delay = int(delay_raw) if isinstance(delay_raw, (int, str)) else None
+        at = str(at_raw) if at_raw is not None else None
+        run_at = parse_when(delay, at)
+        assert self._scheduler is not None
+        job_id = self._scheduler.schedule_once(target, action, dict(payload), run_at)
+        return {"id": job_id, "next_run": run_at.isoformat()}
+
+    async def _tool_schedule_cron(self, params: dict[str, object]) -> dict[str, object]:
+        target = str(params.get("target", "")).strip()
+        action = str(params.get("action", "")).strip()
+        cron = str(params.get("cron", "")).strip()
+        if not target or not action or not cron:
+            raise ValueError("нужны параметры target, action и cron")
+        payload = params.get("params") or {}
+        if not isinstance(payload, dict):
+            raise ValueError("params должен быть объектом")
+        assert self._scheduler is not None
+        job_id = self._scheduler.schedule_cron(target, action, dict(payload), cron)
+        return {"id": job_id, "cron": cron}
+
+    async def _tool_cancel_action(self, params: dict[str, object]) -> dict[str, object]:
+        job_id = str(params.get("id", "")).strip()
+        if not job_id:
+            raise ValueError("нужен параметр id")
+        assert self._scheduler is not None
+        return {"cancelled": self._scheduler.cancel(job_id)}
+
+    async def _tool_list_actions(self, params: dict[str, object]) -> dict[str, object]:
+        assert self._scheduler is not None
+        return {"jobs": self._scheduler.list_jobs()}
+
+    def _setup_scheduler(self) -> None:
+        self._scheduler = ActionScheduler(self.settings.scheduler_db, self._fire_scheduled)
+        self._scheduler.start()
+        obj_schema = {"type": "object"}
+        self.router.register_local(
+            Capability(
+                name="schedule_action",
+                description=(
+                    "Отложенное действие: выполнить action на устройстве target через "
+                    "delay_seconds секунд ИЛИ в момент at (ISO-время). params — аргументы действия"
+                ),
+                risk=RiskLevel.safe,
+                params_schema={
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string"},
+                        "action": {"type": "string"},
+                        "params": obj_schema,
+                        "delay_seconds": {"type": "integer"},
+                        "at": {"type": "string"},
+                    },
+                    "required": ["target", "action"],
+                },
+            ),
+            self._tool_schedule_action,
+        )
+        self.router.register_local(
+            Capability(
+                name="schedule_cron",
+                description=(
+                    "Повторяющееся действие по cron-выражению (5 полей). "
+                    "Выполняет action на target с params по расписанию cron"
+                ),
+                risk=RiskLevel.safe,
+                params_schema={
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string"},
+                        "action": {"type": "string"},
+                        "params": obj_schema,
+                        "cron": {"type": "string"},
+                    },
+                    "required": ["target", "action", "cron"],
+                },
+            ),
+            self._tool_schedule_cron,
+        )
+        self.router.register_local(
+            Capability(
+                name="cancel_action",
+                description="Отменить запланированное действие по id (из list_actions)",
+                risk=RiskLevel.safe,
+                params_schema={
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}},
+                    "required": ["id"],
+                },
+            ),
+            self._tool_cancel_action,
+        )
+        self.router.register_local(
+            Capability(
+                name="list_actions",
+                description="Список запланированных действий (id, target, action, время)",
+                risk=RiskLevel.safe,
+            ),
+            self._tool_list_actions,
+        )
+
     async def _ping_loop(self) -> None:
         while True:
             await asyncio.sleep(self.settings.ping_interval)
@@ -192,6 +315,7 @@ class Core:
         )
         async with Bus(self.settings, client_id=CORE_ID) as bus:
             self._bus = bus
+            self._setup_scheduler()
             await bus.subscribe(REGISTRY_WILDCARD)
             await bus.subscribe(RESP_WILDCARD)
             await bus.subscribe(USER_REQUEST)
@@ -216,6 +340,8 @@ class Core:
                         self._handle_response(data)
             finally:
                 pinger.cancel()
+                if self._scheduler is not None:
+                    self._scheduler.shutdown()
                 self.audit.close()
 
 

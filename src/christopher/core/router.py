@@ -18,8 +18,11 @@ log = logging.getLogger("christopher.router")
 
 # (device_id, action, params, requires_confirm) -> Response
 DeviceCaller = Callable[[str, str, dict[str, Any], bool], Awaitable[Response]]
+# Локальный инструмент, исполняемый в самом Core (напр. планировщик) — без выхода на шину.
+LocalHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
 _EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
+_LOCAL_DEVICE = "core"
 
 
 class ToolRouter:
@@ -32,11 +35,29 @@ class ToolRouter:
         self._registry = registry
         self._caller = caller
         self._audit = audit
+        self._local: dict[str, tuple[Capability, LocalHandler]] = {}
+
+    def register_local(self, capability: Capability, handler: LocalHandler) -> None:
+        """Зарегистрировать инструмент, исполняемый локально в Core (напр. планировщик)."""
+        self._local[capability.name] = (capability, handler)
+
+    @staticmethod
+    def _tool_def(cap: Capability) -> dict[str, Any]:
+        schema = dict(cap.params_schema) if cap.params_schema else dict(_EMPTY_SCHEMA)
+        schema.setdefault("type", "object")
+        schema.setdefault("properties", {})
+        description = cap.description
+        if cap.risk is not RiskLevel.safe:
+            description += f" (риск: {cap.risk.value}, требует подтверждения)"
+        return {"name": cap.name, "description": description, "input_schema": schema}
 
     def tool_definitions(self) -> list[dict[str, Any]]:
-        """Инструменты для Claude из возможностей всех онлайн-устройств (без дублей по имени)."""
+        """Инструменты для Claude: локальные (Core) + возможности онлайн-устройств (без дублей)."""
         tools: list[dict[str, Any]] = []
         seen: set[str] = set()
+        for cap, _handler in self._local.values():
+            seen.add(cap.name)
+            tools.append(self._tool_def(cap))
         for rec in self._registry.all().values():
             if not rec.manifest.online:
                 continue
@@ -44,13 +65,7 @@ class ToolRouter:
                 if cap.name in seen:
                     continue
                 seen.add(cap.name)
-                schema = dict(cap.params_schema) if cap.params_schema else dict(_EMPTY_SCHEMA)
-                schema.setdefault("type", "object")
-                schema.setdefault("properties", {})
-                description = cap.description
-                if cap.risk is not RiskLevel.safe:
-                    description += f" (риск: {cap.risk.value}, требует подтверждения)"
-                tools.append({"name": cap.name, "description": description, "input_schema": schema})
+                tools.append(self._tool_def(cap))
         return tools
 
     def _find_device(self, action: str) -> tuple[str | None, Capability | None]:
@@ -67,6 +82,32 @@ class ToolRouter:
         args = ", ".join(f"{k}={v!r}" for k, v in params.items())
         return f"{action}({args})" if args else f"{action}()"
 
+    def _defer(
+        self,
+        pending: list[PendingAction],
+        device_id: str,
+        action: str,
+        params: dict[str, Any],
+        risk: RiskLevel,
+    ) -> dict[str, Any]:
+        pending.append(
+            PendingAction(
+                device_id=device_id,
+                action=action,
+                params=params,
+                risk=risk,
+                summary=self._summary(action, params),
+            )
+        )
+        return {
+            "ok": True,
+            "status": "confirmation_required",
+            "message": (
+                f"Действие '{action}' уровня {risk.value} требует подтверждения пользователя. "
+                "Сообщи ему, что нужно подтвердить, и НЕ считай действие выполненным."
+            ),
+        }
+
     async def execute(
         self,
         action: str,
@@ -79,37 +120,47 @@ class ToolRouter:
         кладётся в pending; мозг сообщает об этом пользователю. Подтверждённое действие
         затем выполняет execute_confirmed().
         """
+        local = self._local.get(action)
+        if local is not None:
+            local_cap, handler = local
+            if local_cap.risk is not RiskLevel.safe and pending is not None:
+                return self._defer(pending, _LOCAL_DEVICE, action, params, local_cap.risk)
+            return await self._run_local(action, handler, params)
+
         device_id, cap = self._find_device(action)
-        if device_id is None:
+        if device_id is None or cap is None:
             return {"ok": False, "error": f"нет онлайн-устройства с возможностью '{action}'"}
-
-        if cap is not None and cap.risk is not RiskLevel.safe and pending is not None:
-            pending.append(
-                PendingAction(
-                    device_id=device_id,
-                    action=action,
-                    params=params,
-                    risk=cap.risk,
-                    summary=self._summary(action, params),
-                )
-            )
-            return {
-                "ok": True,
-                "status": "confirmation_required",
-                "message": (
-                    f"Действие '{action}' уровня {cap.risk.value} требует подтверждения "
-                    "пользователя. Сообщи ему, что нужно подтвердить, и НЕ считай действие "
-                    "выполненным."
-                ),
-            }
-
+        if cap.risk is not RiskLevel.safe and pending is not None:
+            return self._defer(pending, device_id, action, params, cap.risk)
         return await self._call_and_audit(device_id, action, params, requires_confirm=False)
 
     async def execute_confirmed(self, pa: PendingAction) -> dict[str, Any]:
         """Выполнить подтверждённое пользователем risky-действие (requires_confirm=True)."""
+        local = self._local.get(pa.action)
+        if local is not None:
+            return await self._run_local(pa.action, local[1], dict(pa.params))
         return await self._call_and_audit(
             pa.device_id, pa.action, dict(pa.params), requires_confirm=True
         )
+
+    async def _run_local(
+        self, action: str, handler: LocalHandler, params: dict[str, Any]
+    ) -> dict[str, Any]:
+        try:
+            result = await handler(params)
+            out: dict[str, Any] = {"ok": True, "result": result}
+        except Exception as exc:  # noqa: BLE001 — сбой локального инструмента не роняет мозг
+            log.warning("сбой локального инструмента %s: %s", action, exc)
+            out = {"ok": False, "error": str(exc)}
+        if self._audit is not None:
+            self._audit.record(
+                device=_LOCAL_DEVICE,
+                action=action,
+                params=params,
+                ok=bool(out["ok"]),
+                error=out.get("error"),
+            )
+        return out
 
     async def _call_and_audit(
         self, device_id: str, action: str, params: dict[str, Any], *, requires_confirm: bool

@@ -38,3 +38,6 @@ class BusSettings(BaseSettings):
 
     # Файл аудита действий (SQLite)
     audit_db: str = "christopher.db"
+
+    # Персистентное хранилище задач планировщика (SQLite); переживает перезагрузку Hub'а
+    scheduler_db: str = "christopher-jobs.db"
