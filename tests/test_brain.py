@@ -34,7 +34,9 @@ class _FakeRouter:
             }
         ]
 
-    async def execute(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
+    async def execute(
+        self, action: str, params: dict[str, Any], pending: Any = None
+    ) -> dict[str, Any]:
         self.executed.append((action, params))
         return {"ok": True, "result": {"hostname": "gogabook"}}
 
@@ -52,7 +54,8 @@ async def test_direct_answer_without_tools() -> None:
     responses = [SimpleNamespace(stop_reason="end_turn", content=[_text("Привет!")])]
     brain = Brain(_FakeClient(responses), model="claude-haiku-4-5", max_iterations=5)
     out = await brain.handle("привет", _FakeRouter())  # type: ignore[arg-type]
-    assert out == "Привет!"
+    assert out.text == "Привет!"
+    assert out.pending == []
 
 
 @pytest.mark.asyncio
@@ -64,7 +67,7 @@ async def test_tool_use_loop() -> None:
     router = _FakeRouter()
     brain = Brain(_FakeClient(responses), model="claude-haiku-4-5", max_iterations=5)
     out = await brain.handle("покажи систему", router)  # type: ignore[arg-type]
-    assert out == "Хост gogabook"
+    assert out.text == "Хост gogabook"
     assert router.executed == [("system_info", {})]
 
 
@@ -77,4 +80,4 @@ async def test_iteration_limit() -> None:
     ]
     brain = Brain(_FakeClient(responses), model="claude-haiku-4-5", max_iterations=3)
     out = await brain.handle("зациклись", _FakeRouter())  # type: ignore[arg-type]
-    assert "шаг" in out.lower()
+    assert "шаг" in out.text.lower()

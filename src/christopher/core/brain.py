@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from christopher.core.router import ToolRouter
+from christopher.shared.protocol import PendingAction
 
 log = logging.getLogger("christopher.brain")
 
@@ -21,8 +23,18 @@ SYSTEM_PROMPT = (
     "Отвечай кратко и по-русски. Если для ответа нужно действие на устройстве — вызывай "
     "инструмент.\n"
     "Не выдумывай результаты: если инструмент вернул ошибку — честно сообщи о ней.\n"
+    "Если инструмент вернул status=confirmation_required — действие НЕ выполнено: коротко "
+    "скажи пользователю, что нужно подтвердить, и не утверждай, что сделал это.\n"
     "После выполнения действия дай краткое подтверждение того, что сделано."
 )
+
+
+@dataclass(frozen=True)
+class BrainResult:
+    """Итог обработки запроса: текст ответа + risky-действия, ждущие подтверждения."""
+
+    text: str
+    pending: list[PendingAction] = field(default_factory=list)
 
 
 def _final_text(response: Any) -> str:
@@ -49,9 +61,10 @@ class Brain:
         self._max_iterations = max_iterations
         self._system = system_prompt
 
-    async def handle(self, user_text: str, router: ToolRouter) -> str:
+    async def handle(self, user_text: str, router: ToolRouter) -> BrainResult:
         tools = router.tool_definitions()
         messages: list[dict[str, Any]] = [{"role": "user", "content": user_text}]
+        pending: list[PendingAction] = []
 
         for _ in range(self._max_iterations):
             response = await self._client.messages.create(
@@ -63,14 +76,14 @@ class Brain:
             )
 
             if response.stop_reason != "tool_use":
-                return _final_text(response)
+                return BrainResult(_final_text(response), pending)
 
             messages.append({"role": "assistant", "content": response.content})
             tool_results: list[dict[str, Any]] = []
             for block in response.content:
                 if getattr(block, "type", None) != "tool_use":
                     continue
-                result = await router.execute(block.name, dict(block.input))
+                result = await router.execute(block.name, dict(block.input), pending)
                 log.info("инструмент %s → ok=%s", block.name, result.get("ok"))
                 tool_results.append(
                     {
@@ -81,4 +94,5 @@ class Brain:
                 )
             messages.append({"role": "user", "content": tool_results})
 
-        return "Не удалось завершить за отведённое число шагов — попробуй переформулировать."
+        text = "Не удалось завершить за отведённое число шагов — попробуй переформулировать."
+        return BrainResult(text, pending)

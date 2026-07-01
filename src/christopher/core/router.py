@@ -12,7 +12,7 @@ from typing import Any
 
 from christopher.core.audit import AuditLog
 from christopher.core.registry import DeviceRegistry
-from christopher.shared.protocol import Capability, Response, RiskLevel
+from christopher.shared.protocol import Capability, PendingAction, Response, RiskLevel
 
 log = logging.getLogger("christopher.router")
 
@@ -62,14 +62,58 @@ class ToolRouter:
                     return device_id, cap
         return None, None
 
-    async def execute(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
-        device_id, _cap = self._find_device(action)
+    @staticmethod
+    def _summary(action: str, params: dict[str, Any]) -> str:
+        args = ", ".join(f"{k}={v!r}" for k, v in params.items())
+        return f"{action}({args})" if args else f"{action}()"
+
+    async def execute(
+        self,
+        action: str,
+        params: dict[str, Any],
+        pending: list[PendingAction] | None = None,
+    ) -> dict[str, Any]:
+        """Выполнить safe-действие сразу; risky — отложить в pending на подтверждение.
+
+        Если pending-коллектор передан и действие не safe — действие НЕ выполняется, а
+        кладётся в pending; мозг сообщает об этом пользователю. Подтверждённое действие
+        затем выполняет execute_confirmed().
+        """
+        device_id, cap = self._find_device(action)
         if device_id is None:
             return {"ok": False, "error": f"нет онлайн-устройства с возможностью '{action}'"}
 
-        # Пока не авто-подтверждаем risky-действия: агент отклонит без requires_confirm.
-        # Полный флоу подтверждения (спросить пользователя) — следующий срез.
-        requires_confirm = False
+        if cap is not None and cap.risk is not RiskLevel.safe and pending is not None:
+            pending.append(
+                PendingAction(
+                    device_id=device_id,
+                    action=action,
+                    params=params,
+                    risk=cap.risk,
+                    summary=self._summary(action, params),
+                )
+            )
+            return {
+                "ok": True,
+                "status": "confirmation_required",
+                "message": (
+                    f"Действие '{action}' уровня {cap.risk.value} требует подтверждения "
+                    "пользователя. Сообщи ему, что нужно подтвердить, и НЕ считай действие "
+                    "выполненным."
+                ),
+            }
+
+        return await self._call_and_audit(device_id, action, params, requires_confirm=False)
+
+    async def execute_confirmed(self, pa: PendingAction) -> dict[str, Any]:
+        """Выполнить подтверждённое пользователем risky-действие (requires_confirm=True)."""
+        return await self._call_and_audit(
+            pa.device_id, pa.action, dict(pa.params), requires_confirm=True
+        )
+
+    async def _call_and_audit(
+        self, device_id: str, action: str, params: dict[str, Any], *, requires_confirm: bool
+    ) -> dict[str, Any]:
         try:
             resp = await self._caller(device_id, action, params, requires_confirm)
             out: dict[str, Any] = {"ok": resp.ok, "result": resp.result, "error": resp.error}

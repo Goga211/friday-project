@@ -1,7 +1,9 @@
-"""Возможности desktop-агента (Phase 0 — только безопасные read/notify).
+"""Возможности desktop-агента.
 
-Каждая возможность = (Capability с уровнем риска, async-обработчик). Опасные действия
-(run_command, launch_app, power и т.п.) добавляются в Phase 1 с уровнями confirm/dangerous.
+Каждая возможность = (Capability с уровнем риска, async-обработчик). Безопасные (ping,
+system_info, notify, open_url, screenshot) исполняются сразу; risky (launch_app, type_text —
+confirm; run_command — dangerous) — только после подтверждения (см. флоу подтверждения в Core).
+Реализация навыков управления — в skills.py (диспатч по ОС).
 """
 
 from __future__ import annotations
@@ -13,9 +15,12 @@ import shutil
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from christopher.agents.desktop import skills
 from christopher.shared.protocol import Capability, RiskLevel
 
 Handler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
+_STRING = {"type": "string"}
 
 
 async def _ping(params: dict[str, Any]) -> dict[str, Any]:
@@ -67,6 +72,76 @@ REGISTRY: dict[str, tuple[Capability, Handler]] = {
             },
         ),
         _notify,
+    ),
+    "open_url": (
+        Capability(
+            name="open_url",
+            description="Открыть URL в браузере по умолчанию (params: url — http/https)",
+            risk=RiskLevel.safe,
+            params_schema={
+                "type": "object",
+                "properties": {"url": _STRING},
+                "required": ["url"],
+            },
+        ),
+        skills.open_url,
+    ),
+    "screenshot": (
+        Capability(
+            name="screenshot",
+            description="Сделать скриншот экрана, вернуть путь к PNG (params: path — опц.)",
+            risk=RiskLevel.safe,
+            params_schema={"type": "object", "properties": {"path": _STRING}},
+        ),
+        skills.screenshot,
+    ),
+    "launch_app": (
+        Capability(
+            name="launch_app",
+            description="Запустить приложение по имени из PATH (params: name, args — опц. список)",
+            risk=RiskLevel.confirm,
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "name": _STRING,
+                    "args": {"type": "array", "items": _STRING},
+                },
+                "required": ["name"],
+            },
+        ),
+        skills.launch_app,
+    ),
+    "type_text": (
+        Capability(
+            name="type_text",
+            description=(
+                "Напечатать текст в активное окно (params: text). "
+                "На Wayland+GNOME может быть заблокировано"
+            ),
+            risk=RiskLevel.confirm,
+            params_schema={
+                "type": "object",
+                "properties": {"text": _STRING},
+                "required": ["text"],
+            },
+        ),
+        skills.type_text,
+    ),
+    "run_command": (
+        Capability(
+            name="run_command",
+            description=(
+                "Выполнить shell-команду из allowlist (params: command). "
+                "Только разрешённые программы"
+            ),
+            risk=RiskLevel.dangerous,
+            params_schema={
+                "type": "object",
+                "properties": {"command": _STRING},
+                "required": ["command"],
+            },
+        ),
+        skills.run_command,
     ),
 }
 

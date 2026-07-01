@@ -91,6 +91,17 @@ class UserMessage(BaseModel):
     text: str
 
 
+class PendingAction(BaseModel):
+    """Risky-действие, ожидающее подтверждения пользователя (см. §4 плана)."""
+
+    id: str = Field(default_factory=_uuid)
+    device_id: str
+    action: str
+    params: dict[str, Any] = Field(default_factory=dict)
+    risk: RiskLevel
+    summary: str  # человекочитаемое описание для подтверждения
+
+
 class AssistantReply(BaseModel):
     """Ответ ассистента пользователю."""
 
@@ -98,6 +109,16 @@ class AssistantReply(BaseModel):
     correlation_id: str  # id исходного UserMessage
     ts: datetime = Field(default_factory=_now)
     text: str
+    pending: list[PendingAction] = Field(default_factory=list)  # ждут подтверждения
+
+
+class ConfirmDecision(BaseModel):
+    """Решение пользователя по ожидающим подтверждения действиям."""
+
+    id: str = Field(default_factory=_uuid)
+    ts: datetime = Field(default_factory=_now)
+    reply_id: str  # correlation_id ответа, в котором пришли pending-действия
+    approved: bool
 
 
 class VoiceTranscript(BaseModel):

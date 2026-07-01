@@ -25,6 +25,8 @@ from christopher.shared.protocol import (
     AssistantReply,
     CapabilityManifest,
     Command,
+    ConfirmDecision,
+    PendingAction,
     Response,
     UserMessage,
 )
@@ -32,6 +34,7 @@ from christopher.shared.topics import (
     PREFIX,
     REGISTRY_WILDCARD,
     RESP_WILDCARD,
+    USER_CONFIRM,
     USER_REQUEST,
     cmd_topic,
     user_reply_topic,
@@ -49,6 +52,8 @@ class Core:
         self.audit = AuditLog(settings.audit_db)
         self._bus: Bus | None = None
         self._pending: dict[str, asyncio.Future[Response]] = {}
+        # risky-действия, ждущие подтверждения: reply_id (=id UserMessage) → список действий
+        self._pending_confirm: dict[str, list[PendingAction]] = {}
         self._tasks: set[asyncio.Task[None]] = set()
 
         self.router = ToolRouter(self.registry, self._call_device, self.audit)
@@ -97,17 +102,50 @@ class Core:
 
     async def _process_user_request(self, msg: UserMessage) -> None:
         log.info("← запрос пользователя (id=%s): %s", msg.id[:8], msg.text)
+        pending: list[PendingAction] = []
         if self.brain is None:
             text = "Мозг недоступен: не задан ANTHROPIC_API_KEY."
         else:
             try:
-                text = await self.brain.handle(msg.text, self.router)
+                result = await self.brain.handle(msg.text, self.router)
+                text, pending = result.text, result.pending
             except Exception as exc:  # noqa: BLE001 — не роняем Core на ошибке запроса
                 log.exception("ошибка обработки запроса")
                 text = f"Ошибка обработки запроса: {exc}"
-        reply = AssistantReply(correlation_id=msg.id, text=text)
+        if pending:
+            self._pending_confirm[msg.id] = pending
+        reply = AssistantReply(correlation_id=msg.id, text=text, pending=pending)
         await self._bus_or_raise.publish_model(user_reply_topic(msg.id), reply)
         log.info("→ ответ (id=%s): %s", msg.id[:8], text)
+
+    # --- обработка подтверждения risky-действий ---
+    def _spawn_confirm(self, payload: bytes) -> None:
+        decision = ConfirmDecision.model_validate_json(payload)
+        task = asyncio.create_task(self._process_confirm(decision))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _process_confirm(self, decision: ConfirmDecision) -> None:
+        pending = self._pending_confirm.pop(decision.reply_id, None)
+        if not pending:
+            text = "Нет действий, ожидающих подтверждения (возможно, устарело)."
+        elif not decision.approved:
+            text = "Отменено, ничего не выполнено."
+        else:
+            text = await self._run_confirmed(pending)
+        reply = AssistantReply(correlation_id=decision.reply_id, text=text)
+        await self._bus_or_raise.publish_model(user_reply_topic(decision.reply_id), reply)
+        log.info("→ ответ на подтверждение (id=%s): %s", decision.reply_id[:8], text)
+
+    async def _run_confirmed(self, pending: list[PendingAction]) -> str:
+        lines: list[str] = []
+        for pa in pending:
+            out = await self.router.execute_confirmed(pa)
+            if out.get("ok"):
+                lines.append(f"✓ {pa.summary}")
+            else:
+                lines.append(f"✗ {pa.summary}: {out.get('error')}")
+        return "\n".join(lines)
 
     # --- входящие сообщения ---
     def _handle_manifest(self, payload: bytes) -> None:
@@ -157,7 +195,8 @@ class Core:
             await bus.subscribe(REGISTRY_WILDCARD)
             await bus.subscribe(RESP_WILDCARD)
             await bus.subscribe(USER_REQUEST)
-            log.info("Core подключён, слушаю registry + responses + запросы пользователя")
+            await bus.subscribe(USER_CONFIRM)
+            log.info("Core подключён, слушаю registry + responses + запросы + подтверждения")
 
             pinger = asyncio.create_task(self._ping_loop())
             try:
@@ -169,6 +208,8 @@ class Core:
                     topic = str(message.topic)
                     if topic == USER_REQUEST:
                         self._spawn_user_request(data)
+                    elif topic == USER_CONFIRM:
+                        self._spawn_confirm(data)
                     elif topic.startswith(f"{PREFIX}/registry/"):
                         self._handle_manifest(data)
                     elif topic.startswith(f"{PREFIX}/resp/"):

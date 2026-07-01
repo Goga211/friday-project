@@ -31,6 +31,7 @@ def user_reply_topic(correlation_id: str) -> str:
 
 
 USER_REQUEST = f"{PREFIX}/user/request"
+USER_CONFIRM = f"{PREFIX}/user/confirm"
 USER_REPLY_WILDCARD = f"{PREFIX}/user/reply/+"
 REGISTRY_WILDCARD = f"{PREFIX}/registry/+"
 RESP_WILDCARD = f"{PREFIX}/resp/+"
