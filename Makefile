@@ -1,4 +1,4 @@
-.PHONY: help venv install install-voice lint fmt typecheck test broker broker-down core desktop cli voice
+.PHONY: help venv install install-voice piper lint fmt typecheck test broker broker-down core desktop cli voice
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -15,6 +15,9 @@ install: venv
 
 install-voice: venv
 	$(PY) -m pip install -e ".[dev,voice]"
+
+piper:
+	bash scripts/install-piper.sh
 
 lint:
 	$(VENV)/bin/ruff check src tests

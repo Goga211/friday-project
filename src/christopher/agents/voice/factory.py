@@ -47,6 +47,10 @@ def build_sink(settings: VoiceSettings) -> AudioSink:
 def build_wake(settings: VoiceSettings) -> WakeWordDetector:
     if settings.wake == "fake":
         return FakeWakeWord(set())
+    if settings.wake == "pushtotalk":
+        from christopher.agents.voice.providers.pushtotalk import PushToTalkWakeWord
+
+        return PushToTalkWakeWord()
     if settings.wake == "openwakeword":
         from christopher.agents.voice.providers.openwakeword_ww import OpenWakeWordDetector
 

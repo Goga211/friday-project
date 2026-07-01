@@ -53,23 +53,26 @@ make cli          # текстовый чат с Кристофером
 
 ### Голос (Phase 2)
 
-Голосовому агенту нужны системный **Piper** (бинарь + русский голос `.onnx`) и Python-extra:
-
 ```bash
-make install-voice                       # ставит .[dev,voice] (openwakeword, sounddevice, numpy, httpx)
-# Piper — отдельно: https://github.com/rhasspy/piper (бинарь) + голос ru_RU (*.onnx)
+make install-voice            # Python-extra: openwakeword, sounddevice, numpy, httpx
+make piper                    # качает бинарь Piper + русский голос в vendor/ и models/
 ```
 
 Настрой `.env` (см. `.env.example`, блок `CHRISTOPHER_VOICE_`): ключ Yandex SpeechKit
-(`YANDEX_API_KEY`/`YANDEX_FOLDER_ID`), путь к голосу Piper (`PIPER_MODEL`) и к обученной
-модели wake-word (`WAKE_MODEL`). Затем:
+(`YANDEX_API_KEY`/`YANDEX_FOLDER_ID`) и пути Piper (их печатает `make piper`).
+
+**Быстрый живой тест (без обучения wake-word)** — активация по Enter:
 
 ```bash
-make voice        # голосовой агент на Hub'е (нужен запущенный Core + брокер)
+# в .env: CHRISTOPHER_VOICE_WAKE=pushtotalk
+make voice        # нужен запущенный брокер + Core (make broker, make core)
 ```
 
-Скажи «Кристофер», задай вопрос — фраза уйдёт в STT → мозг → ответ голосом.
-Своя модель «Кристофер» для openWakeWord обучается отдельно (русское слово нужно тренировать).
+Жмёшь Enter → говоришь фразу → пауза → слышишь ответ. Так проверяется весь боевой путь
+(микрофон → STT → мозг → TTS) до того, как обучена модель.
+
+**Полноценный wake-word** «Кристофер» (`CHRISTOPHER_VOICE_WAKE=openwakeword` + `WAKE_MODEL`)
+для openWakeWord обучается отдельно — русское слово нужно тренировать.
 
 ## Разработка
 

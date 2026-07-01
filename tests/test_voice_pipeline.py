@@ -147,3 +147,13 @@ def test_factory_builds_fakes() -> None:
     assert isinstance(build_sink(settings), FakeSink)
     assert isinstance(build_wake(settings), FakeWakeWord)
     assert isinstance(build_recognizer(settings), FakeRecognizer)
+
+
+def test_pushtotalk_triggers_once_per_press() -> None:
+    from christopher.agents.voice.providers.pushtotalk import PushToTalkWakeWord
+
+    ptt = PushToTalkWakeWord()
+    assert ptt.process(b"") == 0.0  # без нажатия — молчок
+    ptt._pending.set()  # эмулируем нажатие Enter
+    assert ptt.process(b"") == 1.0  # одно срабатывание
+    assert ptt.process(b"") == 0.0  # одно нажатие = одна запись
