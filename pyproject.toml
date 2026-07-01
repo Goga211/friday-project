@@ -9,6 +9,7 @@ description = "Christopher — distributed AI assistant (Hub + device agents), c
 requires-python = ">=3.12"
 dependencies = [
     "aiomqtt>=2.3",
+    "anthropic>=0.40",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
 ]
@@ -25,6 +26,7 @@ dev = [
 [project.scripts]
 christopher-core = "christopher.core.app:main"
 christopher-desktop = "christopher.agents.desktop.app:main"
+christopher-cli = "christopher.cli.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/christopher"]

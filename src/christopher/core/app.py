@@ -1,8 +1,8 @@
-"""Core-сервис (скелет Phase 0).
+"""Core-сервис (Phase 1).
 
-Подключается к шине, слушает анонсы возможностей (registry) и ответы (resp),
-ведёт реестр устройств и периодически пингует онлайн-агентов. Мозг (Claude) и
-маршрутизация навыков подключаются в Phase 1.
+Крутит мозг (Claude tool-use) поверх шины: слушает запросы пользователя (user/request),
+прогоняет их через Brain + ToolRouter (который шлёт команды агентам и ждёт ответы),
+возвращает ответ. Плюс реестр устройств, аудит и периодический ping.
 """
 
 from __future__ import annotations
@@ -10,17 +10,31 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 
+from anthropic import AsyncAnthropic
+
+from christopher.core.audit import AuditLog
+from christopher.core.brain import Brain
 from christopher.core.registry import DeviceRegistry
+from christopher.core.router import ToolRouter
 from christopher.shared.bus import Bus
 from christopher.shared.config import BusSettings
 from christopher.shared.logging import setup_logging
-from christopher.shared.protocol import CapabilityManifest, Command, Response
+from christopher.shared.protocol import (
+    AssistantReply,
+    CapabilityManifest,
+    Command,
+    Response,
+    UserMessage,
+)
 from christopher.shared.topics import (
     PREFIX,
     REGISTRY_WILDCARD,
     RESP_WILDCARD,
+    USER_REQUEST,
     cmd_topic,
+    user_reply_topic,
 )
 
 log = logging.getLogger("christopher.core")
@@ -28,71 +42,145 @@ log = logging.getLogger("christopher.core")
 CORE_ID = "christopher-core"
 
 
-async def ping_loop(bus: Bus, registry: DeviceRegistry, interval: int) -> None:
-    while True:
-        await asyncio.sleep(interval)
-        for device_id in registry.online_devices():
-            cmd = Command(source=CORE_ID, target=device_id, action="ping")
-            await bus.publish_model(cmd_topic(device_id), cmd)
-            log.info("→ ping %s (cmd=%s)", device_id, cmd.id[:8])
+class Core:
+    def __init__(self, settings: BusSettings) -> None:
+        self.settings = settings
+        self.registry = DeviceRegistry()
+        self.audit = AuditLog(settings.audit_db)
+        self._bus: Bus | None = None
+        self._pending: dict[str, asyncio.Future[Response]] = {}
+        self._tasks: set[asyncio.Task[None]] = set()
 
+        self.router = ToolRouter(self.registry, self._call_device, self.audit)
+        self.brain: Brain | None = None
+        if os.getenv("ANTHROPIC_API_KEY"):
+            self.brain = Brain(
+                AsyncAnthropic(),
+                model=settings.llm_model,
+                max_tokens=settings.llm_max_tokens,
+                max_iterations=settings.llm_max_iterations,
+            )
+        else:
+            log.warning("ANTHROPIC_API_KEY не задан — мозг отключён (только реестр/ping)")
 
-def _handle_manifest(registry: DeviceRegistry, payload: bytes | bytearray) -> None:
-    manifest = CapabilityManifest.model_validate_json(bytes(payload))
-    registry.update(manifest)
-    status = "online" if manifest.online else "offline"
-    caps = ", ".join(c.name for c in manifest.capabilities) or "—"
-    log.info(
-        "registry: %s [%s] %s | возможности: %s",
-        manifest.device_id,
-        manifest.platform,
-        status,
-        caps,
-    )
+    @property
+    def _bus_or_raise(self) -> Bus:
+        if self._bus is None:
+            raise RuntimeError("Core: шина не подключена")
+        return self._bus
 
-
-def _handle_response(payload: bytes | bytearray) -> None:
-    resp = Response.model_validate_json(bytes(payload))
-    if resp.ok:
-        log.info("← resp от %s (cmd=%s): %s", resp.source, resp.correlation_id[:8], resp.result)
-    else:
-        log.warning(
-            "← resp от %s (cmd=%s) ОШИБКА: %s",
-            resp.source,
-            resp.correlation_id[:8],
-            resp.error,
+    # --- вызов устройства с ожиданием ответа (для ToolRouter) ---
+    async def _call_device(
+        self, device_id: str, action: str, params: dict[str, object], requires_confirm: bool
+    ) -> Response:
+        cmd = Command(
+            source=CORE_ID,
+            target=device_id,
+            action=action,
+            params=dict(params),
+            requires_confirm=requires_confirm,
         )
+        future: asyncio.Future[Response] = asyncio.get_running_loop().create_future()
+        self._pending[cmd.id] = future
+        await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+        try:
+            return await asyncio.wait_for(future, timeout=self.settings.command_timeout)
+        finally:
+            self._pending.pop(cmd.id, None)
+
+    # --- обработка запроса пользователя (в отдельной задаче) ---
+    def _spawn_user_request(self, payload: bytes) -> None:
+        msg = UserMessage.model_validate_json(payload)
+        task = asyncio.create_task(self._process_user_request(msg))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _process_user_request(self, msg: UserMessage) -> None:
+        log.info("← запрос пользователя (id=%s): %s", msg.id[:8], msg.text)
+        if self.brain is None:
+            text = "Мозг недоступен: не задан ANTHROPIC_API_KEY."
+        else:
+            try:
+                text = await self.brain.handle(msg.text, self.router)
+            except Exception as exc:  # noqa: BLE001 — не роняем Core на ошибке запроса
+                log.exception("ошибка обработки запроса")
+                text = f"Ошибка обработки запроса: {exc}"
+        reply = AssistantReply(correlation_id=msg.id, text=text)
+        await self._bus_or_raise.publish_model(user_reply_topic(msg.id), reply)
+        log.info("→ ответ (id=%s): %s", msg.id[:8], text)
+
+    # --- входящие сообщения ---
+    def _handle_manifest(self, payload: bytes) -> None:
+        manifest = CapabilityManifest.model_validate_json(payload)
+        self.registry.update(manifest)
+        status = "online" if manifest.online else "offline"
+        caps = ", ".join(c.name for c in manifest.capabilities) or "—"
+        log.info(
+            "registry: %s [%s] %s | возможности: %s",
+            manifest.device_id,
+            manifest.platform,
+            status,
+            caps,
+        )
+
+    def _handle_response(self, payload: bytes) -> None:
+        resp = Response.model_validate_json(payload)
+        future = self._pending.get(resp.correlation_id)
+        if future is not None and not future.done():
+            future.set_result(resp)
+            return
+        # не наш pending (напр. ответ на ping) — просто логируем
+        if resp.ok:
+            log.info("← resp от %s (cmd=%s): %s", resp.source, resp.correlation_id[:8], resp.result)
+        else:
+            log.warning(
+                "← resp от %s (cmd=%s) ОШИБКА: %s", resp.source, resp.correlation_id[:8], resp.error
+            )
+
+    async def _ping_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.settings.ping_interval)
+            for device_id in self.registry.online_devices():
+                cmd = Command(source=CORE_ID, target=device_id, action="ping")
+                await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+
+    async def run(self) -> None:
+        log.info(
+            "Core стартует, брокер %s:%s (tls=%s, модель=%s)",
+            self.settings.broker_host,
+            self.settings.broker_port,
+            self.settings.tls,
+            self.settings.llm_model,
+        )
+        async with Bus(self.settings, client_id=CORE_ID) as bus:
+            self._bus = bus
+            await bus.subscribe(REGISTRY_WILDCARD)
+            await bus.subscribe(RESP_WILDCARD)
+            await bus.subscribe(USER_REQUEST)
+            log.info("Core подключён, слушаю registry + responses + запросы пользователя")
+
+            pinger = asyncio.create_task(self._ping_loop())
+            try:
+                async for message in bus.messages:
+                    payload = message.payload
+                    if not isinstance(payload, (bytes, bytearray)):
+                        continue
+                    data = bytes(payload)
+                    topic = str(message.topic)
+                    if topic == USER_REQUEST:
+                        self._spawn_user_request(data)
+                    elif topic.startswith(f"{PREFIX}/registry/"):
+                        self._handle_manifest(data)
+                    elif topic.startswith(f"{PREFIX}/resp/"):
+                        self._handle_response(data)
+            finally:
+                pinger.cancel()
+                self.audit.close()
 
 
 async def run() -> None:
     setup_logging()
-    settings = BusSettings()
-    registry = DeviceRegistry()
-    log.info(
-        "Core стартует, брокер %s:%s (tls=%s)",
-        settings.broker_host,
-        settings.broker_port,
-        settings.tls,
-    )
-
-    async with Bus(settings, client_id=CORE_ID) as bus:
-        await bus.subscribe(REGISTRY_WILDCARD)
-        await bus.subscribe(RESP_WILDCARD)
-        log.info("Core подключён, слушаю registry + responses")
-
-        pinger = asyncio.create_task(ping_loop(bus, registry, settings.ping_interval))
-        try:
-            async for msg in bus.messages:
-                payload = msg.payload
-                if not isinstance(payload, (bytes, bytearray)):
-                    continue
-                topic = str(msg.topic)
-                if topic.startswith(f"{PREFIX}/registry/"):
-                    _handle_manifest(registry, payload)
-                elif topic.startswith(f"{PREFIX}/resp/"):
-                    _handle_response(payload)
-        finally:
-            pinger.cancel()
+    await Core(BusSettings()).run()
 
 
 def main() -> None:

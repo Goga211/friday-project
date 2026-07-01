@@ -19,6 +19,11 @@ htmlcov/
 .env
 *.local
 
+# Локальные данные (аудит и т.п.)
+*.db
+*.sqlite
+*.sqlite3
+
 # Certs (generated locally, never commit)
 infra/certs/
 

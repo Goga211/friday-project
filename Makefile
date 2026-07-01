@@ -1,4 +1,4 @@
-.PHONY: help venv install lint fmt typecheck test broker broker-down core desktop
+.PHONY: help venv install lint fmt typecheck test broker broker-down core desktop cli
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -37,3 +37,6 @@ core:
 
 desktop:
 	$(PY) -m christopher.agents.desktop.app
+
+cli:
+	$(PY) -m christopher.cli.app

@@ -81,3 +81,20 @@ class Event(BaseModel):
     source: str
     type: str
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class UserMessage(BaseModel):
+    """Запрос пользователя к ассистенту (из CLI/HUD/голоса)."""
+
+    id: str = Field(default_factory=_uuid)
+    ts: datetime = Field(default_factory=_now)
+    text: str
+
+
+class AssistantReply(BaseModel):
+    """Ответ ассистента пользователю."""
+
+    id: str = Field(default_factory=_uuid)
+    correlation_id: str  # id исходного UserMessage
+    ts: datetime = Field(default_factory=_now)
+    text: str

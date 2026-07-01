@@ -25,6 +25,13 @@ def registry_topic(device_id: str) -> str:
     return f"{PREFIX}/registry/{device_id}"
 
 
+def user_reply_topic(correlation_id: str) -> str:
+    """Ответ ассистента пользователю (по id UserMessage)."""
+    return f"{PREFIX}/user/reply/{correlation_id}"
+
+
+USER_REQUEST = f"{PREFIX}/user/request"
+USER_REPLY_WILDCARD = f"{PREFIX}/user/reply/+"
 REGISTRY_WILDCARD = f"{PREFIX}/registry/+"
 RESP_WILDCARD = f"{PREFIX}/resp/+"
 EVENT_WILDCARD = f"{PREFIX}/event/#"

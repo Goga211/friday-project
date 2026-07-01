@@ -26,3 +26,15 @@ class BusSettings(BaseSettings):
 
     # Интервал ping от Core к агентам, сек
     ping_interval: int = 15
+
+    # Таймаут ожидания ответа устройства на команду, сек
+    command_timeout: float = 30.0
+
+    # Мозг (Claude). API-ключ берётся из ANTHROPIC_API_KEY (стандарт SDK).
+    # По умолчанию Haiku — дёшево для базовых команд; сложное можно поднять до Sonnet/Opus.
+    llm_model: str = "claude-haiku-4-5"
+    llm_max_tokens: int = 2048
+    llm_max_iterations: int = 8
+
+    # Файл аудита действий (SQLite)
+    audit_db: str = "christopher.db"
