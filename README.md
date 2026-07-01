@@ -72,7 +72,16 @@ make voice        # нужен запущенный брокер + Core (make br
 (микрофон → STT → мозг → TTS) до того, как обучена модель.
 
 **Полноценный wake-word** «Кристофер» (`CHRISTOPHER_VOICE_WAKE=openwakeword` + `WAKE_MODEL`)
-для openWakeWord обучается отдельно — русское слово нужно тренировать.
+обучается отдельно — русское слово нужно тренировать под свой голос:
+
+```bash
+scripts/install-piper.sh dmitri && scripts/install-piper.sh irina  # русские голоса
+scripts/train-wakeword.sh 1500                                      # позитивы «Кристофер»
+# дальше — обучение openWakeWord, см. docs/wake-word-training.md
+```
+
+Полный разбор (почему не англоязычный генератор, обучение, тюнинг порога) —
+[docs/wake-word-training.md](docs/wake-word-training.md).
 
 ## Разработка
 
