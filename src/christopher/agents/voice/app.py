@@ -34,6 +34,7 @@ from christopher.shared.protocol import (
     Capability,
     CapabilityManifest,
     Command,
+    ConfirmDecision,
     Response,
     RiskLevel,
     UserMessage,
@@ -42,6 +43,7 @@ from christopher.shared.protocol import (
 )
 from christopher.shared.topics import (
     PREFIX,
+    USER_CONFIRM,
     USER_REPLY_WILDCARD,
     USER_REQUEST,
     VOICE_SAY,
@@ -52,6 +54,18 @@ from christopher.shared.topics import (
 )
 
 log = logging.getLogger("christopher.voice.app")
+
+# Слова согласия для подтверждения risky-действий голосом (иначе — отказ).
+_AFFIRMATIVE = {
+    "да", "ага", "угу", "давай", "конечно", "подтверждаю", "подтверждай",
+    "выполняй", "делай", "да-да", "ок", "окей", "хорошо", "утверждаю", "го",
+}
+
+
+def _is_affirmative(text: str) -> bool:
+    """Понял ли пользователь «да»: хоть одно слово-согласие в ответе (пунктуацию отбрасываем)."""
+    words = {w.strip(".,!?;:—-").lower() for w in text.split()}
+    return bool(words & _AFFIRMATIVE)
 
 _SAY_CAPABILITY = Capability(
     name="say",
@@ -86,7 +100,9 @@ class VoiceApp:
         self._bus: Bus | None = None
         self._synth: SpeechSynthesizer | None = None
         self._sink: AudioSink | None = None
-        self._pending: dict[str, asyncio.Future[str]] = {}
+        self._pending: dict[str, asyncio.Future[AssistantReply]] = {}
+        # correlation_id ответа с risky-действиями, ждущими устного «да/нет» следующей фразой.
+        self._awaiting_confirm: str | None = None
 
     @property
     def _bus_or_raise(self) -> Bus:
@@ -96,17 +112,50 @@ class VoiceApp:
 
     # --- колбэки пайплайна ---
     async def _on_transcript(self, text: str) -> str:
+        # Если ждём устного подтверждения — трактуем фразу как «да/нет», а не новый запрос.
+        if self._awaiting_confirm is not None:
+            return await self._resolve_confirm(text)
+
+        reply = await self._ask_brain(text)
+        if reply is None:
+            return "Извини, я не успел получить ответ."
+        if reply.pending:  # мозг просит подтверждения — запоминаем и ждём следующую фразу
+            self._awaiting_confirm = reply.correlation_id
+        return reply.text
+
+    async def _ask_brain(self, text: str) -> AssistantReply | None:
         msg = UserMessage(text=text)
-        future: asyncio.Future[str] = asyncio.get_running_loop().create_future()
+        future: asyncio.Future[AssistantReply] = asyncio.get_running_loop().create_future()
         self._pending[msg.id] = future
         await self._bus_or_raise.publish_model(USER_REQUEST, msg)
         try:
             return await asyncio.wait_for(future, timeout=self._voice.reply_timeout)
         except TimeoutError:
             log.warning("мозг не ответил за %.0f с", self._voice.reply_timeout)
-            return "Извини, я не успел получить ответ."
+            return None
         finally:
             self._pending.pop(msg.id, None)
+
+    async def _resolve_confirm(self, text: str) -> str:
+        reply_id = self._awaiting_confirm
+        assert reply_id is not None
+        self._awaiting_confirm = None
+        approved = _is_affirmative(text)
+        log.info("устное подтверждение: '%s' → approved=%s", text, approved)
+
+        future: asyncio.Future[AssistantReply] = asyncio.get_running_loop().create_future()
+        self._pending[reply_id] = future
+        await self._bus_or_raise.publish_model(
+            USER_CONFIRM, ConfirmDecision(reply_id=reply_id, approved=approved)
+        )
+        try:
+            result = await asyncio.wait_for(future, timeout=self._voice.reply_timeout)
+            return result.text
+        except TimeoutError:
+            log.warning("Core не ответил на подтверждение за %.0f с", self._voice.reply_timeout)
+            return "Извини, я не дождался результата."
+        finally:
+            self._pending.pop(reply_id, None)
 
     async def _on_event(self, kind: str, text: str) -> None:
         if kind == "transcript":
@@ -119,7 +168,7 @@ class VoiceApp:
         reply = AssistantReply.model_validate_json(payload)
         future = self._pending.get(reply.correlation_id)
         if future is not None and not future.done():
-            future.set_result(reply.text)
+            future.set_result(reply)
 
     async def _handle_command(self, payload: bytes) -> None:
         cmd = Command.model_validate_json(payload)

@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 from christopher.agents.voice.interfaces import AudioClip
 
 
 class FakeAudioSource:
-    """Отдаёт заранее заданный список кадров и завершается (пайплайн выйдет из run())."""
+    """Отдаёт заранее заданный список кадров и завершается (пайплайн выйдет из run()).
+
+    Перед каждым кадром отдаёт управление циклу событий (как реальный микрофон между
+    блоками), чтобы фоновые задачи (воспроизведение ответа) успевали отработать — это
+    делает поведение barge-in детерминированным в тестах.
+    """
 
     def __init__(self, frames: list[bytes]) -> None:
         self._frames = frames
 
     async def frames(self) -> AsyncIterator[bytes]:
         for frame in self._frames:
+            await asyncio.sleep(0)
             yield frame
 
 

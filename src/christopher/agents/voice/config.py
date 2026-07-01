@@ -26,6 +26,8 @@ class VoiceSettings(BaseSettings):
     # Путь к обученной модели «Кристофер» (.onnx/.tflite). Пусто → предобученные (НЕ «Кристофер»).
     wake_model: str | None = None
     wake_threshold: float = 0.5
+    # Перебивать ли ответ TTS новым wake-word (barge-in). Выключи, если ложные срабатывания.
+    barge_in: bool = True
 
     # --- Конец фразы (VAD по энергии) ---
     vad_energy_threshold: float = 400.0  # RMS int16, выше — речь
