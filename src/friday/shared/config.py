@@ -42,6 +42,10 @@ class BusSettings(BaseSettings):
     # Сколько последних реплик диалога держать в контексте мозга (user+assistant вместе)
     llm_history_max_messages: int = 20
 
+    # Веб-чат (зачаток HUD): адрес HTTP-сервера
+    hud_host: str = "127.0.0.1"
+    hud_port: int = 8010
+
     # Файл аудита действий (SQLite)
     audit_db: str = "friday.db"
 

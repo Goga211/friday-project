@@ -1,4 +1,4 @@
-.PHONY: help venv install install-voice piper lint fmt typecheck test broker broker-down core desktop cli voice
+.PHONY: help venv install install-voice install-hud piper lint fmt typecheck test broker broker-down core desktop cli voice hud
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -12,6 +12,9 @@ venv:
 install: venv
 	$(PY) -m pip install -U pip
 	$(PY) -m pip install -e ".[dev]"
+
+install-hud: venv
+	$(PY) -m pip install -e ".[dev,hud]"
 
 install-voice: venv
 	$(PY) -m pip install -e ".[dev,voice]"
@@ -51,3 +54,6 @@ cli:
 
 voice:
 	$(PY) -m friday.agents.voice.app
+
+hud:
+	$(PY) -m friday.hud.app

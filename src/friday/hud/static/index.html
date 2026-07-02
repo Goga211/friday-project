@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пятница — HUD</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --surface: #121924;
+    --surface-2: #182234;
+    --text: #dbe7f3;
+    --muted: #6b7f94;
+    --accent: #37c8e0;
+    --accent-dim: #1a5e6b;
+    --danger: #e06a5a;
+    --ok: #5ad07f;
+    --radius: 14px;
+    font-size: 16px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 70% -10%, #12202e 0%, var(--bg) 55%);
+    color: var(--text);
+    font: 400 1rem/1.5 "Segoe UI", system-ui, sans-serif;
+    height: 100dvh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .9rem 1.25rem; border-bottom: 1px solid #1c2a3a;
+    backdrop-filter: blur(6px);
+  }
+  header h1 {
+    font-size: 1.05rem; font-weight: 600; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  header .sub { color: var(--muted); font-size: .8rem; letter-spacing: .05em; }
+  #dot {
+    width: .6rem; height: .6rem; border-radius: 50%;
+    background: var(--danger); transition: background .3s;
+    box-shadow: 0 0 8px currentColor;
+  }
+  #dot.on { background: var(--ok); }
+  main { flex: 1; overflow-y: auto; padding: 1.25rem; display: flex; flex-direction: column; gap: .6rem; }
+  .msg {
+    max-width: 72%; padding: .6rem .9rem; border-radius: var(--radius);
+    white-space: pre-wrap; word-break: break-word; animation: pop .18s ease-out;
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(4px); } }
+  .user { align-self: flex-end; background: var(--accent-dim); border-bottom-right-radius: 4px; }
+  .assistant { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 4px; }
+  .status { align-self: center; color: var(--muted); font-size: .8rem; }
+  .say { align-self: flex-start; color: var(--muted); font-size: .85rem; font-style: italic; }
+  .badge {
+    display: inline-block; margin-right: .4rem; padding: 0 .4rem;
+    border: 1px solid var(--accent-dim); border-radius: 6px;
+    color: var(--accent); font-size: .7rem; vertical-align: middle;
+  }
+  .pending { margin-top: .55rem; border-top: 1px solid #24354a; padding-top: .55rem; }
+  .pending .item { font-size: .85rem; color: var(--muted); font-family: ui-monospace, monospace; }
+  .pending .buttons { display: flex; gap: .5rem; margin-top: .5rem; }
+  .pending button {
+    padding: .3rem .9rem; border-radius: 8px; border: 1px solid transparent;
+    font: inherit; font-size: .85rem; cursor: pointer; transition: filter .15s;
+  }
+  .pending button:hover { filter: brightness(1.2); }
+  .pending .yes { background: var(--accent-dim); color: var(--text); }
+  .pending .no { background: transparent; border-color: #3a2a2a; color: var(--danger); }
+  form {
+    display: flex; gap: .6rem; padding: 1rem 1.25rem 1.25rem; border-top: 1px solid #1c2a3a;
+  }
+  input {
+    flex: 1; padding: .7rem 1rem; border-radius: var(--radius);
+    border: 1px solid #24354a; background: var(--surface); color: var(--text);
+    font: inherit; outline: none; transition: border-color .2s;
+  }
+  input:focus { border-color: var(--accent); }
+  form button {
+    padding: .7rem 1.3rem; border-radius: var(--radius); border: none;
+    background: var(--accent); color: #06222a; font: 600 1rem/1 inherit;
+    cursor: pointer; transition: filter .15s;
+  }
+  form button:hover { filter: brightness(1.1); }
+</style>
+</head>
+<body>
+<header>
+  <div id="dot"></div>
+  <h1>Пятница</h1>
+  <span class="sub">HUD · веб-чат</span>
+</header>
+<main id="log"></main>
+<form id="form">
+  <input id="input" placeholder="Скажи Пятнице…" autocomplete="off" autofocus>
+  <button type="submit">→</button>
+</form>
+<script>
+"use strict";
+const logEl = document.getElementById("log");
+const dot = document.getElementById("dot");
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+let ws = null;
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function append(node) {
+  logEl.appendChild(node);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderAssistant(data) {
+  const msg = el("div", "msg assistant", data.text);
+  if (data.pending && data.pending.length) {
+    const box = el("div", "pending");
+    for (const item of data.pending) box.appendChild(el("div", "item", item));
+    const buttons = el("div", "buttons");
+    const yes = el("button", "yes", "Подтвердить");
+    const no = el("button", "no", "Отменить");
+    const decide = (approved) => {
+      ws?.send(JSON.stringify({ type: "confirm", reply_id: data.reply_id, approved }));
+      box.remove();
+    };
+    yes.onclick = () => decide(true);
+    no.onclick = () => decide(false);
+    buttons.append(yes, no);
+    box.appendChild(buttons);
+    msg.appendChild(box);
+  }
+  append(msg);
+}
+
+function renderUser(data) {
+  const msg = el("div", "msg user");
+  if (data.via === "voice") msg.appendChild(el("span", "badge", "голос"));
+  msg.appendChild(document.createTextNode(data.text));
+  append(msg);
+}
+
+function onMessage(event) {
+  const data = JSON.parse(event.data);
+  if (data.type === "assistant") renderAssistant(data);
+  else if (data.type === "user") renderUser(data);
+  else if (data.type === "voice_say") append(el("div", "msg say", "🔊 " + data.text));
+  else if (data.type === "status") append(el("div", "status", data.text));
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { dot.classList.add("on"); };
+  ws.onmessage = onMessage;
+  ws.onclose = () => {
+    dot.classList.remove("on");
+    setTimeout(connect, 1500);  // сервер ушёл — тихо переподключаемся
+  };
+}
+
+form.onsubmit = (event) => {
+  event.preventDefault();
+  const text = input.value.trim();
+  if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ type: "user", text }));
+  input.value = "";
+};
+
+connect();
+</script>
+</body>
+</html>
