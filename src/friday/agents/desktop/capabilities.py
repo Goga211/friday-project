@@ -38,9 +38,32 @@ async def _system_info(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_WINDOWS_NOTIFY_PS = """
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$icon = New-Object System.Windows.Forms.NotifyIcon
+$icon.Icon = [System.Drawing.SystemIcons]::Information
+$icon.Visible = $true
+$icon.ShowBalloonTip(5000, {title}, {message}, 'Info')
+Start-Sleep -Seconds 6
+$icon.Dispose()
+"""
+
+
 async def _notify(params: dict[str, Any]) -> dict[str, Any]:
     title = str(params.get("title", "Пятница"))
     message = str(params.get("message", ""))
+
+    if platform.system() == "Windows":
+        script = _WINDOWS_NOTIFY_PS.format(
+            title=skills.ps_quote(title), message=skills.ps_quote(message or " ")
+        )
+        # fire-and-forget: скрипт сам живёт ~6 с, пока показывается баллон
+        await skills.spawn_detached(
+            "powershell", "-NoProfile", "-NonInteractive", "-Command", script
+        )
+        return {"sent": True}
+
     notifier = shutil.which("notify-send")
     if notifier is None:
         raise RuntimeError("notify-send недоступен (поставь libnotify-bin)")
@@ -142,6 +165,52 @@ REGISTRY: dict[str, tuple[Capability, Handler]] = {
             },
         ),
         skills.run_command,
+    ),
+    "list_windows": (
+        Capability(
+            name="list_windows",
+            description="Список заголовков открытых окон (Windows/X11)",
+            risk=RiskLevel.safe,
+        ),
+        skills.list_windows,
+    ),
+    "focus_window": (
+        Capability(
+            name="focus_window",
+            description=(
+                "Вывести окно на передний план по подстроке заголовка "
+                "(params: title; Windows/X11)"
+            ),
+            risk=RiskLevel.confirm,
+            params_schema={
+                "type": "object",
+                "properties": {"title": _STRING},
+                "required": ["title"],
+            },
+        ),
+        skills.focus_window,
+    ),
+    "manage_window": (
+        Capability(
+            name="manage_window",
+            description=(
+                "Свернуть/развернуть/восстановить/закрыть окно по подстроке заголовка "
+                "(params: title, action: minimize|maximize|restore|close; Windows/X11)"
+            ),
+            risk=RiskLevel.confirm,
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "title": _STRING,
+                    "action": {
+                        "type": "string",
+                        "enum": ["minimize", "maximize", "restore", "close"],
+                    },
+                },
+                "required": ["title", "action"],
+            },
+        ),
+        skills.manage_window,
     ),
 }
 
