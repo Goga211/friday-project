@@ -2,122 +2,106 @@
 
 Локальный детектор пробуждения — единственный ИИ, который крутится на Hub'е постоянно
 (см. `openwakeword_ww.py`). Предобученные модели openWakeWord — англоязычные и слова
-«Пятница» не знают, поэтому свою модель нужно **обучить**. Ниже — практичный путь под
-русское слово.
+«Пятница» не знают, поэтому свою модель нужно **обучить**.
+
+GPU локально нет → тренинг делаем на **Google Colab** (бесплатный GPU, ~30 мин). Здесь, в
+репозитории, готовим **датасет**; Colab только обучает.
 
 ## TL;DR
 
 ```bash
-# 1. Поставить Piper и несколько русских голосов (для разнообразия дикторов)
-scripts/install-piper.sh dmitri
-scripts/install-piper.sh irina
-scripts/install-piper.sh denis
-scripts/install-piper.sh ruslan
+# 1. Синтетические позитивы (15 живых голосов Yandex) — нужны ключи Yandex в .env
+scripts/gen-wakeword-samples.py --engine yandex --count 750
 
-# 2. Сгенерировать позитивные сэмплы «Пятница»
-scripts/gen-wakeword-samples.py --count 1500 --out-dir data/wake/positive
+# 2. Свои ЖИВЫЕ записи «Пятница» (решающие данные) — в тот же датасет
+scripts/record-wakeword.py --count 40
 
-# 3. Обучить модель openWakeWord (см. раздел «Обучение») → models/friday.onnx
+# 3. Упаковать для Colab
+cd data/wake && zip -r friday_positives.zip positive/ && cd ../..
 
-# 4. Прописать в .env и проверить
+# 4. Обучить на Colab (см. ниже) → friday.onnx
+# 5. Подключить
+cp friday.onnx models/ && sed -i 's/FRIDAY_VOICE_WAKE=.*/FRIDAY_VOICE_WAKE=openwakeword/' .env
 echo 'FRIDAY_VOICE_WAKE_MODEL=models/friday.onnx' >> .env
 ```
 
-## Почему не «автоматический» генератор openWakeWord
+## Шаг 1. Синтетические позитивы
 
-Официальный `automatic_model_training.ipynb` генерирует позитивы через
-`piper-sample-generator` — а это **английская** модель LibriTTS. Слово «Пятница»
-кириллицей она произнесёт неправильно, и модель обучится не на том звуке.
+`scripts/gen-wakeword-samples.py` — два движка:
 
-Решение: генерируем позитивы уже установленным **русским** Piper, прогоняя фразу через
-несколько голосов с вариацией темпа и «шумности» (`gen-wakeword-samples.py`). Это даёт
-акустическое разнообразие (разные дикторы, скорость, интонация). Остальную аугментацию —
-реверберацию, фоновый шум, подбор негативов — делает уже сам тренинг openWakeWord.
+- `--engine yandex` (рекомендуется): 15 нейроголосов Yandex v3 + вариация темпа. Разнообразные
+  живые дикторы → модель лучше обобщает. Нужны ключи Yandex в `.env` (те же, что STT/TTS),
+  сеть, копейки за генерацию.
+- `--engine piper`: офлайн, бесплатно, 4 голоса Piper (роботно, но фонетика валидна).
 
-> **Лучший результат** — домешать 20–50 своих живых записей «Пятница» (разные комнаты,
-> расстояние до микрофона, громкость) в ту же папку `data/wake/positive`. Синтез хорошо
-> обобщает по дикторам, но твой реальный голос/микрофон/акустика синтетика не покрывает.
-
-## Шаг 1–2. Позитивные сэмплы
-
-`scripts/gen-wakeword-samples.py`:
-
-- берёт русские голоса из `models/ru_RU-*.onnx` (их ставит `install-piper.sh`),
-- чередует голоса и случайно варьирует `length_scale` (темп) и `noise_scale/noise_w`,
-- приводит каждый клип к **16 кГц / 16-бит / моно** (требование openWakeWord) на stdlib,
-  без ffmpeg.
+Все клипы приводятся к **16 кГц / 16-бит / моно** (требование openWakeWord). Лежат в
+`data/wake/positive/` (gitignored).
 
 ```bash
-scripts/gen-wakeword-samples.py \
-  --phrase "Пятница" \
-  --count 1500 \
-  --out-dir data/wake/positive
+scripts/gen-wakeword-samples.py --engine yandex --count 750
 ```
 
-Чем больше голосов установлено — тем разнообразнее датасет. 1000–2000 сэмплов достаточно
-для старта.
+## Шаг 2. Свои живые записи (важнее всего)
 
-## Шаг 3. Обучение модели openWakeWord
-
-Обучение тяжёлое (нужен GPU, скачиваются несколько ГБ негативов и импульсных характеристик
-комнат). Каноничный путь — ноутбук openWakeWord; наши позитивы подставляются вместо
-англоязычных.
+Синтетика даёт обобщение, но wake-word должен надёжно срабатывать на **твой** голос, микрофон
+и акустику комнаты — этого синтетика не покрывает. Запиши 30–50 своих «Пятница»:
 
 ```bash
-# Отдельное окружение под тренинг (не в проектный .venv — тянет torch и пр.)
-python3 -m venv .venv-train && source .venv-train/bin/activate
-pip install "openwakeword[full]"
-
-git clone https://github.com/dscripka/openWakeWord
-cd openWakeWord
+scripts/record-wakeword.py --count 40
 ```
 
-Дальше — по `notebooks/automatic_model_training.ipynb` (или `custom_model.ipynb`), с двумя
-отличиями под наш случай:
+По Enter пишет ~1.5 с в тот же датасет (префикс `friday_live_`). Меняй интонацию, громкость,
+расстояние до микрофона, комнату — чем разнообразнее, тем устойчивее модель.
 
-1. **Пропустить генерацию позитивов** англоязычным `piper-sample-generator`. Вместо этого
-   указать в конфиге путь к нашим клипам из `data/wake/positive`.
-2. В конфиге тренинга задать:
-   - `target_phrase: "Пятница"` (метка модели),
-   - `model_name: friday`,
-   - негативы/валидацию — предвычисленные фичи openWakeWord (ссылки на них есть в ноутбуке;
-     скачиваются автоматически),
-   - число шагов: начать с `steps: 10000–50000`.
-
-На выходе — `friday.onnx` (openWakeWord умеет экспортировать и `.tflite`; мы грузим
-`.onnx`, см. `openwakeword_ww.py`).
-
-> Без GPU обучение возможно, но медленное. Как альтернатива — тот же ноутбук в Google Colab
-> (бесплатный GPU): загрузить туда архив `data/wake/positive` и следовать шагам выше.
-
-## Шаг 4. Подключение и проверка
+## Шаг 3. Упаковка
 
 ```bash
-cp openWakeWord/models/friday.onnx models/     # положить рядом с голосами
-echo 'FRIDAY_VOICE_WAKE_MODEL=models/friday.onnx' >> .env
+cd data/wake && zip -r friday_positives.zip positive/ && cd ../..
 ```
 
-Живой тест детектора (без облака и мозга — только срабатывание wake-word):
+Получишь `data/wake/friday_positives.zip` — его зальёшь в Colab.
+
+## Шаг 4. Обучение на Colab
+
+Каноничный путь — ноутбук openWakeWord с бесплатным GPU; наши позитивы подставляются вместо
+англоязычного генератора.
+
+1. Открой **`automatic_model_training.ipynb`** из репозитория openWakeWord в Colab:
+   `https://github.com/dscripka/openWakeWord` → `notebooks/automatic_model_training.ipynb` →
+   кнопка «Open in Colab».
+2. **Runtime → Change runtime type → GPU** (T4 бесплатно).
+3. **Залей `friday_positives.zip`** (панель Files слева) и распакуй в ячейке:
+   ```python
+   !unzip -q friday_positives.zip -d my_positives
+   ```
+4. В конфиге тренинга (ячейка с YAML/параметрами):
+   - `target_word: "Пятница"` (метка), `model_name: friday`,
+   - **путь к позитивам** → `my_positives/positive` (вместо генерации `piper-sample-generator`;
+     ячейку с генерацией англоязычных позитивов пропусти/закомментируй),
+   - негативы/фоновый шум/импульсы — оставь как в ноутбуке (скачиваются автоматически),
+   - `steps: 10000` для старта (можно больше при слабом качестве).
+5. **Runtime → Run all**. Через ~20–40 мин появится `friday.onnx` (openWakeWord умеет и `.tflite`;
+   мы грузим `.onnx`).
+6. Скачай `friday.onnx`.
+
+## Шаг 5. Подключение и тюнинг
 
 ```bash
-# порог по умолчанию 0.5; понижай при пропусках, повышай при ложных срабатываниях
-FRIDAY_VOICE_WAKE_THRESHOLD=0.5 python -m friday.agents.voice.app
+cp ~/Downloads/friday.onnx models/
+# .env: включить openwakeword и указать модель
+sed -i 's/FRIDAY_VOICE_WAKE=.*/FRIDAY_VOICE_WAKE=openwakeword/' .env
+grep -q FRIDAY_VOICE_WAKE_MODEL .env || echo 'FRIDAY_VOICE_WAKE_MODEL=models/friday.onnx' >> .env
+make voice   # теперь hands-free: скажи «Пятница»
 ```
-
-Полный голосовой контур (wake → запись → STT → мозг → TTS → barge-in) — как обычно, при
-заданных ключах Yandex STT и установленном Piper.
-
-## Тюнинг
 
 | Симптом | Что крутить |
 |---|---|
-| Не реагирует на «Пятница» | ↓ `FRIDAY_VOICE_WAKE_THRESHOLD` (напр. 0.3); больше живых позитивов |
-| Срабатывает на посторонние слова | ↑ порог (0.6–0.7); больше шагов обучения; больше негативов |
-| Реагирует на TTS-ответ (самоперебивание barge-in) | ↑ порог или `FRIDAY_VOICE_BARGE_IN=false` |
+| Не реагирует на «Пятница» | ↓ `FRIDAY_VOICE_WAKE_THRESHOLD` (напр. 0.3); больше живых записей |
+| Ложные срабатывания | ↑ порог (0.6–0.7); больше шагов обучения |
+| Перебивает сам себя во время ответа | ↑ порог или `FRIDAY_VOICE_BARGE_IN=false` |
 
 ## Файлы
 
-- `scripts/install-piper.sh` — Piper + русские голоса.
-- `scripts/gen-wakeword-samples.py` — генерация позитивов «Пятница».
-- `scripts/train-wakeword.sh` — обёртка: проверки + генерация + подсказки по обучению.
+- `scripts/gen-wakeword-samples.py` — синтетические позитивы (yandex|piper).
+- `scripts/record-wakeword.py` — живые записи своего голоса.
 - `src/friday/agents/voice/providers/openwakeword_ww.py` — загрузка обученной модели.
