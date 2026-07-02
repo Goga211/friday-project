@@ -41,13 +41,13 @@ broker-down:
 	cd infra && docker compose down
 
 core:
-	$(PY) -m christopher.core.app
+	$(PY) -m friday.core.app
 
 desktop:
-	$(PY) -m christopher.agents.desktop.app
+	$(PY) -m friday.agents.desktop.app
 
 cli:
-	$(PY) -m christopher.cli.app
+	$(PY) -m friday.cli.app
 
 voice:
-	$(PY) -m christopher.agents.voice.app
+	$(PY) -m friday.agents.voice.app

@@ -1,8 +1,8 @@
 import pytest
 
-from christopher.core.registry import DeviceRegistry
-from christopher.core.router import ToolRouter
-from christopher.shared.protocol import (
+from friday.core.registry import DeviceRegistry
+from friday.core.router import ToolRouter
+from friday.shared.protocol import (
     Capability,
     CapabilityManifest,
     PendingAction,

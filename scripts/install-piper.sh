@@ -47,10 +47,10 @@ cat <<EOF
 
 Готово. Пропиши в .env (пути относительно корня репозитория):
 
-  CHRISTOPHER_VOICE_PIPER_BIN=${PIPER_BIN#"${ROOT}/"}
-  CHRISTOPHER_VOICE_PIPER_MODEL=${VOICE_ONNX#"${ROOT}/"}
-  CHRISTOPHER_VOICE_PIPER_SAMPLE_RATE=22050
+  FRIDAY_VOICE_PIPER_BIN=${PIPER_BIN#"${ROOT}/"}
+  FRIDAY_VOICE_PIPER_MODEL=${VOICE_ONNX#"${ROOT}/"}
+  FRIDAY_VOICE_PIPER_SAMPLE_RATE=22050
 
 Проверка синтеза (должен получиться WAV):
-  echo "Привет, я Кристофер" | ${PIPER_BIN} --model ${VOICE_ONNX} --output_file /tmp/test.wav
+  echo "Привет, я Пятница" | ${PIPER_BIN} --model ${VOICE_ONNX} --output_file /tmp/test.wav
 EOF

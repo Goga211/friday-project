@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from christopher.core import scheduler as scheduler_module
-from christopher.core.scheduler import ActionScheduler, parse_when
+from friday.core import scheduler as scheduler_module
+from friday.core.scheduler import ActionScheduler, parse_when
 
 
 def test_parse_when_delay_seconds() -> None:

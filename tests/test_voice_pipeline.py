@@ -7,11 +7,11 @@ import asyncio
 
 import pytest
 
-from christopher.agents.voice.config import VoiceSettings
-from christopher.agents.voice.factory import build_recognizer, build_sink, build_source, build_wake
-from christopher.agents.voice.interfaces import AudioClip
-from christopher.agents.voice.pipeline import VoicePipeline
-from christopher.agents.voice.providers.fake import (
+from friday.agents.voice.config import VoiceSettings
+from friday.agents.voice.factory import build_recognizer, build_sink, build_source, build_wake
+from friday.agents.voice.interfaces import AudioClip
+from friday.agents.voice.pipeline import VoicePipeline
+from friday.agents.voice.providers.fake import (
     FakeAudioSource,
     FakeRecognizer,
     FakeSink,
@@ -229,7 +229,7 @@ def test_factory_builds_fakes() -> None:
 
 
 def test_pushtotalk_triggers_once_per_press() -> None:
-    from christopher.agents.voice.providers.pushtotalk import PushToTalkWakeWord
+    from friday.agents.voice.providers.pushtotalk import PushToTalkWakeWord
 
     ptt = PushToTalkWakeWord()
     assert ptt.process(b"") == 0.0  # без нажатия — молчок

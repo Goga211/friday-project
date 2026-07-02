@@ -7,17 +7,17 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from christopher.agents.voice.app import VoiceApp, _is_affirmative
-from christopher.agents.voice.config import VoiceSettings
-from christopher.shared.config import BusSettings
-from christopher.shared.protocol import (
+from friday.agents.voice.app import VoiceApp, _is_affirmative
+from friday.agents.voice.config import VoiceSettings
+from friday.shared.config import BusSettings
+from friday.shared.protocol import (
     AssistantReply,
     ConfirmDecision,
     PendingAction,
     RiskLevel,
     UserMessage,
 )
-from christopher.shared.topics import USER_CONFIRM, USER_REQUEST
+from friday.shared.topics import USER_CONFIRM, USER_REQUEST
 
 
 class _FakeBus:

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Генерация позитивных сэмплов wake-word «Кристофер» для обучения openWakeWord.
+"""Генерация позитивных сэмплов wake-word «Пятница» для обучения openWakeWord.
 
 Русского многоголосого TTS-генератора у openWakeWord нет (их piper-sample-generator —
-английская модель и «Кристофер» произнесёт неверно). Поэтому синтезируем позитивы уже
+английская модель и «Пятница» произнесёт неверно). Поэтому синтезируем позитивы уже
 установленным русским Piper (scripts/install-piper.sh), гоняя фразу через НЕСКОЛЬКО голосов
 с вариацией темпа и «шумности» — так набирается акустическое разнообразие (разные дикторы,
 скорость, интонация), нужное модели для обобщения. Дальнейшую аугментацию (реверберация,
@@ -25,7 +25,7 @@ import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PHRASE = "Кристофер"
+DEFAULT_PHRASE = "Пятница"
 TARGET_RATE = 16000  # требование openWakeWord
 
 # Матрица вариаций озвучки (Piper): темп (length_scale) и «шумность» голоса.
@@ -84,7 +84,7 @@ def generate(
     made = 0
     for i in range(count):
         voice = voices[i % len(voices)]
-        out_wav = out_dir / f"christopher_{i:05d}.wav"
+        out_wav = out_dir / f"friday_{i:05d}.wav"
         try:
             _synthesize(piper_bin, voice, phrase, out_wav, rng)
             _to_16k_mono(out_wav)

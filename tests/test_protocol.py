@@ -1,4 +1,4 @@
-from christopher.shared.protocol import (
+from friday.shared.protocol import (
     Capability,
     CapabilityManifest,
     Command,

@@ -6,7 +6,7 @@ import platform
 
 import pytest
 
-from christopher.agents.desktop import skills
+from friday.agents.desktop import skills
 
 _LINUX = platform.system() == "Linux"
 
@@ -19,7 +19,7 @@ async def test_run_command_allowlist_rejects_dangerous() -> None:
 
 @pytest.mark.asyncio
 async def test_run_command_allowlist_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("CHRISTOPHER_CMD_ALLOWLIST", "echo")
+    monkeypatch.setenv("FRIDAY_CMD_ALLOWLIST", "echo")
     with pytest.raises(PermissionError):
         await skills.run_command({"command": "ls -la"})  # ls вне явного allowlist
 

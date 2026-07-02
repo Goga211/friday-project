@@ -1,8 +1,8 @@
-# Обучение wake-word «Кристофер»
+# Обучение wake-word «Пятница»
 
 Локальный детектор пробуждения — единственный ИИ, который крутится на Hub'е постоянно
 (см. `openwakeword_ww.py`). Предобученные модели openWakeWord — англоязычные и слова
-«Кристофер» не знают, поэтому свою модель нужно **обучить**. Ниже — практичный путь под
+«Пятница» не знают, поэтому свою модель нужно **обучить**. Ниже — практичный путь под
 русское слово.
 
 ## TL;DR
@@ -14,19 +14,19 @@ scripts/install-piper.sh irina
 scripts/install-piper.sh denis
 scripts/install-piper.sh ruslan
 
-# 2. Сгенерировать позитивные сэмплы «Кристофер»
+# 2. Сгенерировать позитивные сэмплы «Пятница»
 scripts/gen-wakeword-samples.py --count 1500 --out-dir data/wake/positive
 
-# 3. Обучить модель openWakeWord (см. раздел «Обучение») → models/christopher.onnx
+# 3. Обучить модель openWakeWord (см. раздел «Обучение») → models/friday.onnx
 
 # 4. Прописать в .env и проверить
-echo 'CHRISTOPHER_VOICE_WAKE_MODEL=models/christopher.onnx' >> .env
+echo 'FRIDAY_VOICE_WAKE_MODEL=models/friday.onnx' >> .env
 ```
 
 ## Почему не «автоматический» генератор openWakeWord
 
 Официальный `automatic_model_training.ipynb` генерирует позитивы через
-`piper-sample-generator` — а это **английская** модель LibriTTS. Слово «Кристофер»
+`piper-sample-generator` — а это **английская** модель LibriTTS. Слово «Пятница»
 кириллицей она произнесёт неправильно, и модель обучится не на том звуке.
 
 Решение: генерируем позитивы уже установленным **русским** Piper, прогоняя фразу через
@@ -34,7 +34,7 @@ echo 'CHRISTOPHER_VOICE_WAKE_MODEL=models/christopher.onnx' >> .env
 акустическое разнообразие (разные дикторы, скорость, интонация). Остальную аугментацию —
 реверберацию, фоновый шум, подбор негативов — делает уже сам тренинг openWakeWord.
 
-> **Лучший результат** — домешать 20–50 своих живых записей «Кристофер» (разные комнаты,
+> **Лучший результат** — домешать 20–50 своих живых записей «Пятница» (разные комнаты,
 > расстояние до микрофона, громкость) в ту же папку `data/wake/positive`. Синтез хорошо
 > обобщает по дикторам, но твой реальный голос/микрофон/акустика синтетика не покрывает.
 
@@ -49,7 +49,7 @@ echo 'CHRISTOPHER_VOICE_WAKE_MODEL=models/christopher.onnx' >> .env
 
 ```bash
 scripts/gen-wakeword-samples.py \
-  --phrase "Кристофер" \
+  --phrase "Пятница" \
   --count 1500 \
   --out-dir data/wake/positive
 ```
@@ -78,13 +78,13 @@ cd openWakeWord
 1. **Пропустить генерацию позитивов** англоязычным `piper-sample-generator`. Вместо этого
    указать в конфиге путь к нашим клипам из `data/wake/positive`.
 2. В конфиге тренинга задать:
-   - `target_phrase: "Кристофер"` (метка модели),
-   - `model_name: christopher`,
+   - `target_phrase: "Пятница"` (метка модели),
+   - `model_name: friday`,
    - негативы/валидацию — предвычисленные фичи openWakeWord (ссылки на них есть в ноутбуке;
      скачиваются автоматически),
    - число шагов: начать с `steps: 10000–50000`.
 
-На выходе — `christopher.onnx` (openWakeWord умеет экспортировать и `.tflite`; мы грузим
+На выходе — `friday.onnx` (openWakeWord умеет экспортировать и `.tflite`; мы грузим
 `.onnx`, см. `openwakeword_ww.py`).
 
 > Без GPU обучение возможно, но медленное. Как альтернатива — тот же ноутбук в Google Colab
@@ -93,15 +93,15 @@ cd openWakeWord
 ## Шаг 4. Подключение и проверка
 
 ```bash
-cp openWakeWord/models/christopher.onnx models/     # положить рядом с голосами
-echo 'CHRISTOPHER_VOICE_WAKE_MODEL=models/christopher.onnx' >> .env
+cp openWakeWord/models/friday.onnx models/     # положить рядом с голосами
+echo 'FRIDAY_VOICE_WAKE_MODEL=models/friday.onnx' >> .env
 ```
 
 Живой тест детектора (без облака и мозга — только срабатывание wake-word):
 
 ```bash
 # порог по умолчанию 0.5; понижай при пропусках, повышай при ложных срабатываниях
-CHRISTOPHER_VOICE_WAKE_THRESHOLD=0.5 python -m christopher.agents.voice.app
+FRIDAY_VOICE_WAKE_THRESHOLD=0.5 python -m friday.agents.voice.app
 ```
 
 Полный голосовой контур (wake → запись → STT → мозг → TTS → barge-in) — как обычно, при
@@ -111,13 +111,13 @@ CHRISTOPHER_VOICE_WAKE_THRESHOLD=0.5 python -m christopher.agents.voice.app
 
 | Симптом | Что крутить |
 |---|---|
-| Не реагирует на «Кристофер» | ↓ `CHRISTOPHER_VOICE_WAKE_THRESHOLD` (напр. 0.3); больше живых позитивов |
+| Не реагирует на «Пятница» | ↓ `FRIDAY_VOICE_WAKE_THRESHOLD` (напр. 0.3); больше живых позитивов |
 | Срабатывает на посторонние слова | ↑ порог (0.6–0.7); больше шагов обучения; больше негативов |
-| Реагирует на TTS-ответ (самоперебивание barge-in) | ↑ порог или `CHRISTOPHER_VOICE_BARGE_IN=false` |
+| Реагирует на TTS-ответ (самоперебивание barge-in) | ↑ порог или `FRIDAY_VOICE_BARGE_IN=false` |
 
 ## Файлы
 
 - `scripts/install-piper.sh` — Piper + русские голоса.
-- `scripts/gen-wakeword-samples.py` — генерация позитивов «Кристофер».
+- `scripts/gen-wakeword-samples.py` — генерация позитивов «Пятница».
 - `scripts/train-wakeword.sh` — обёртка: проверки + генерация + подсказки по обучению.
-- `src/christopher/agents/voice/providers/openwakeword_ww.py` — загрузка обученной модели.
+- `src/friday/agents/voice/providers/openwakeword_ww.py` — загрузка обученной модели.

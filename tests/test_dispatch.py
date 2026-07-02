@@ -1,8 +1,8 @@
 import pytest
 
-from christopher.agents.desktop.app import dispatch
-from christopher.agents.desktop.capabilities import REGISTRY
-from christopher.shared.protocol import Command
+from friday.agents.desktop.app import dispatch
+from friday.agents.desktop.capabilities import REGISTRY
+from friday.shared.protocol import Command
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Готовит данные для обучения wake-word «Кристофер»: проверяет Piper и русские голоса,
+# Готовит данные для обучения wake-word «Пятница»: проверяет Piper и русские голоса,
 # генерирует позитивные сэмплы и печатает следующие шаги обучения openWakeWord.
 # Само обучение (torch, GPU, гигабайты негативов) выносится в отдельное окружение —
 # см. docs/wake-word-training.md. Здесь — детерминированная часть: подготовка позитивов.
@@ -11,7 +11,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COUNT="${1:-1500}"
-PHRASE="Кристофер"
+PHRASE="Пятница"
 POSITIVE_DIR="${ROOT}/data/wake/positive"
 PIPER_BIN="${ROOT}/vendor/piper/piper"
 MODELS="${ROOT}/models"
@@ -45,14 +45,14 @@ PYTHON="$(command -v python3 || command -v python)"
 echo "→ Генерирую ${COUNT} позитивных сэмплов «${PHRASE}»…"
 "${PYTHON}" "${GEN}" --phrase "${PHRASE}" --count "${COUNT}" --out-dir "${POSITIVE_DIR}"
 
-COUNT_MADE=$(find "${POSITIVE_DIR}" -name 'christopher_*.wav' | wc -l | tr -d ' ')
+COUNT_MADE=$(find "${POSITIVE_DIR}" -name 'friday_*.wav' | wc -l | tr -d ' ')
 
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────
 Позитивы готовы: ${COUNT_MADE} файлов в ${POSITIVE_DIR#"${ROOT}/"}
 
-Совет: домешай 20–50 своих ЖИВЫХ записей «Кристофер» в эту же папку
+Совет: домешай 20–50 своих ЖИВЫХ записей «Пятница» в эту же папку
 (разные комнаты, расстояние, громкость) — заметно поднимает точность.
 
 Следующий шаг — обучение (отдельное окружение, GPU желателен):
@@ -63,10 +63,10 @@ cat <<EOF
 
 Затем в notebooks/automatic_model_training.ipynb укажи наши позитивы
 (${POSITIVE_DIR#"${ROOT}/"}) вместо англоязычного генератора и обучи
-модель christopher.onnx. Полный гайд: docs/wake-word-training.md
+модель friday.onnx. Полный гайд: docs/wake-word-training.md
 
 После обучения:
-  cp .../christopher.onnx models/
-  echo 'CHRISTOPHER_VOICE_WAKE_MODEL=models/christopher.onnx' >> .env
+  cp .../friday.onnx models/
+  echo 'FRIDAY_VOICE_WAKE_MODEL=models/friday.onnx' >> .env
 ────────────────────────────────────────────────────────────────────
 EOF

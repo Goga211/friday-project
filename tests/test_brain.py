@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from christopher.core.brain import Brain
+from friday.core.brain import Brain
 
 
 class _FakeMessages:

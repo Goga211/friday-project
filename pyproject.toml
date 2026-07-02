@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "christopher"
+name = "friday"
 version = "0.0.1"
-description = "Christopher — distributed AI assistant (Hub + device agents), cloud-only brain"
+description = "Пятница — distributed AI assistant (Hub + device agents), cloud-only brain"
 requires-python = ">=3.12"
 dependencies = [
     "aiomqtt>=2.3",
@@ -41,13 +41,13 @@ voice = [
 ]
 
 [project.scripts]
-christopher-core = "christopher.core.app:main"
-christopher-desktop = "christopher.agents.desktop.app:main"
-christopher-cli = "christopher.cli.app:main"
-christopher-voice = "christopher.agents.voice.app:main"
+friday-core = "friday.core.app:main"
+friday-desktop = "friday.agents.desktop.app:main"
+friday-cli = "friday.cli.app:main"
+friday-voice = "friday.agents.voice.app:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/christopher"]
+packages = ["src/friday"]
 
 [tool.ruff]
 line-length = 100

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import array
 
-from christopher.agents.voice.vad import Endpointer, frame_rms
+from friday.agents.voice.vad import Endpointer, frame_rms
 
 FRAME_SAMPLES = 1280
 

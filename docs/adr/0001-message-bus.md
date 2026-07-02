@@ -13,7 +13,7 @@
 - retained-сообщения удобны для анонса возможностей (registry) и статуса online/offline;
 - Last-Will для авто-перевода агента в offline при обрыве.
 
-Топики и контракт — `src/christopher/shared/topics.py` и `protocol.py`.
+Топики и контракт — `src/friday/shared/topics.py` и `protocol.py`.
 Клиент — `aiomqtt` (async, поверх paho).
 
 ## Альтернатива
