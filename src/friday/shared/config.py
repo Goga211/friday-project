@@ -27,6 +27,10 @@ class BusSettings(BaseSettings):
     # Интервал ping от Core к агентам, сек
     ping_interval: int = 15
 
+    # Авто-переподключение к брокеру при разрыве: стартовая и потолочная задержка backoff, сек
+    reconnect_initial_delay: float = 1.0
+    reconnect_max_delay: float = 60.0
+
     # Таймаут ожидания ответа устройства на команду, сек
     command_timeout: float = 30.0
 

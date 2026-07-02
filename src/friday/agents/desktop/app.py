@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import platform
 
 import aiomqtt
 
 from friday.agents.desktop.capabilities import REGISTRY, manifest_capabilities
-from friday.shared.bus import Bus
+from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.logging import setup_logging
 from friday.shared.protocol import CapabilityManifest, Command, Response, RiskLevel
@@ -71,19 +72,27 @@ async def run() -> None:
     settings = BusSettings()
     device_id = settings.device_id or _default_device_id()
 
+    log.info(
+        "Desktop-агент '%s' стартует, брокер %s:%s",
+        device_id,
+        settings.broker_host,
+        settings.broker_port,
+    )
+    await run_with_reconnect(
+        functools.partial(_session, settings, device_id),
+        initial_delay=settings.reconnect_initial_delay,
+        max_delay=settings.reconnect_max_delay,
+    )
+
+
+async def _session(settings: BusSettings, device_id: str) -> None:
+    """Один жизненный цикл соединения: манифест → подписка → цикл команд."""
     offline = _build_manifest(device_id, online=False)
     will = aiomqtt.Will(
         topic=registry_topic(device_id),
         payload=offline.model_dump_json().encode(),
         qos=1,
         retain=True,
-    )
-
-    log.info(
-        "Desktop-агент '%s' стартует, брокер %s:%s",
-        device_id,
-        settings.broker_host,
-        settings.broker_port,
     )
 
     async with Bus(settings, client_id=device_id, will=will) as bus:

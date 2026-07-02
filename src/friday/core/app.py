@@ -12,6 +12,7 @@ import contextlib
 import logging
 import os
 
+import aiomqtt
 from anthropic import AsyncAnthropic
 
 from friday.core.audit import AuditLog
@@ -19,7 +20,7 @@ from friday.core.brain import Brain
 from friday.core.registry import DeviceRegistry
 from friday.core.router import ToolRouter
 from friday.core.scheduler import ActionScheduler, parse_when
-from friday.shared.bus import Bus
+from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.env import load_env
 from friday.shared.logging import setup_logging
@@ -98,6 +99,15 @@ class Core:
         finally:
             self._pending.pop(cmd.id, None)
 
+    async def _publish_reply(self, reply_id: str, reply: AssistantReply) -> None:
+        """Отправить ответ пользователю. Разрыв шины в этот момент не должен ронять
+        задачу-обработчик «exception never retrieved»-ом: ответ уже не доставить
+        (реконнект идёт в фоне), но потерю фиксируем в логе, а не молча."""
+        try:
+            await self._bus_or_raise.publish_model(user_reply_topic(reply_id), reply)
+        except aiomqtt.MqttError:
+            log.warning("разрыв шины: ответ пользователю (id=%s) не доставлен", reply_id[:8])
+
     # --- обработка запроса пользователя (в отдельной задаче) ---
     def _spawn_user_request(self, payload: bytes) -> None:
         msg = UserMessage.model_validate_json(payload)
@@ -120,7 +130,7 @@ class Core:
         if pending:
             self._pending_confirm[msg.id] = pending
         reply = AssistantReply(correlation_id=msg.id, text=text, pending=pending)
-        await self._bus_or_raise.publish_model(user_reply_topic(msg.id), reply)
+        await self._publish_reply(msg.id, reply)
         log.info("→ ответ (id=%s): %s", msg.id[:8], text)
 
     # --- обработка подтверждения risky-действий ---
@@ -139,7 +149,7 @@ class Core:
         else:
             text = await self._run_confirmed(pending)
         reply = AssistantReply(correlation_id=decision.reply_id, text=text)
-        await self._bus_or_raise.publish_model(user_reply_topic(decision.reply_id), reply)
+        await self._publish_reply(decision.reply_id, reply)
         log.info("→ ответ на подтверждение (id=%s): %s", decision.reply_id[:8], text)
 
     async def _run_confirmed(self, pending: list[PendingAction]) -> str:
@@ -204,7 +214,15 @@ class Core:
             params=dict(params),
             requires_confirm=True,
         )
-        await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+        try:
+            await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+        except aiomqtt.MqttError:
+            log.warning(
+                "scheduler: '%s' сработало в момент разрыва шины — команда до %s не дошла",
+                action,
+                device_id,
+            )
+            return
         log.info("scheduler: команда %s → %s отправлена", action, device_id)
 
     async def _tool_schedule_action(self, params: dict[str, object]) -> dict[str, object]:
@@ -324,9 +342,12 @@ class Core:
     async def _ping_loop(self) -> None:
         while True:
             await asyncio.sleep(self.settings.ping_interval)
-            for device_id in self.registry.online_devices():
-                cmd = Command(source=CORE_ID, target=device_id, action="ping")
-                await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+            try:
+                for device_id in self.registry.online_devices():
+                    cmd = Command(source=CORE_ID, target=device_id, action="ping")
+                    await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+            except aiomqtt.MqttError:
+                return  # связь упала — цикл сообщений это заметит и переподключится
 
     async def run(self) -> None:
         log.info(
@@ -336,9 +357,23 @@ class Core:
             self.settings.tls,
             self.settings.llm_model,
         )
+        # Планировщик и аудит живут поверх переподключений — стартуем один раз.
+        self._setup_scheduler()
+        try:
+            await run_with_reconnect(
+                self._session,
+                initial_delay=self.settings.reconnect_initial_delay,
+                max_delay=self.settings.reconnect_max_delay,
+            )
+        finally:
+            if self._scheduler is not None:
+                self._scheduler.shutdown()
+            self.audit.close()
+
+    async def _session(self) -> None:
+        """Один жизненный цикл соединения: connect → subscribe → цикл сообщений."""
         async with Bus(self.settings, client_id=CORE_ID) as bus:
             self._bus = bus
-            self._setup_scheduler()
             await bus.subscribe(REGISTRY_WILDCARD)
             await bus.subscribe(RESP_WILDCARD)
             await bus.subscribe(USER_REQUEST)
@@ -363,9 +398,6 @@ class Core:
                         self._handle_response(data)
             finally:
                 pinger.cancel()
-                if self._scheduler is not None:
-                    self._scheduler.shutdown()
-                self.audit.close()
 
 
 async def run() -> None:

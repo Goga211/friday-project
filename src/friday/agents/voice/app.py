@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import platform
 
@@ -26,7 +27,7 @@ from friday.agents.voice.factory import (
 )
 from friday.agents.voice.interfaces import AudioSink, SpeechSynthesizer
 from friday.agents.voice.pipeline import VoicePipeline
-from friday.shared.bus import Bus
+from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.logging import setup_logging
 from friday.shared.protocol import (
@@ -57,8 +58,21 @@ log = logging.getLogger("friday.voice.app")
 
 # Слова согласия для подтверждения risky-действий голосом (иначе — отказ).
 _AFFIRMATIVE = {
-    "да", "ага", "угу", "давай", "конечно", "подтверждаю", "подтверждай",
-    "выполняй", "делай", "да-да", "ок", "окей", "хорошо", "утверждаю", "го",
+    "да",
+    "ага",
+    "угу",
+    "давай",
+    "конечно",
+    "подтверждаю",
+    "подтверждай",
+    "выполняй",
+    "делай",
+    "да-да",
+    "ок",
+    "окей",
+    "хорошо",
+    "утверждаю",
+    "го",
 }
 
 
@@ -66,6 +80,7 @@ def _is_affirmative(text: str) -> bool:
     """Понял ли пользователь «да»: хоть одно слово-согласие в ответе (пунктуацию отбрасываем)."""
     words = {w.strip(".,!?;:—-").lower() for w in text.split()}
     return bool(words & _AFFIRMATIVE)
+
 
 _SAY_CAPABILITY = Capability(
     name="say",
@@ -243,13 +258,6 @@ class VoiceApp:
         )
 
     async def run(self) -> None:
-        offline = _build_manifest(self._device_id, online=False)
-        will = aiomqtt.Will(
-            topic=registry_topic(self._device_id),
-            payload=offline.model_dump_json().encode(),
-            qos=1,
-            retain=True,
-        )
         log.info(
             "Голосовой агент '%s' стартует (wake=%s, stt=%s, tts=%s, audio=%s)",
             self._device_id,
@@ -258,13 +266,28 @@ class VoiceApp:
             self._voice.tts,
             self._voice.audio,
         )
+        # Провайдеры (микрофон, модели) живут поверх переподключений — собираем один раз.
+        pipeline = self._build_pipeline()
+        if pipeline is None:
+            return
+        await run_with_reconnect(
+            functools.partial(self._session, pipeline),
+            initial_delay=self._bus_settings.reconnect_initial_delay,
+            max_delay=self._bus_settings.reconnect_max_delay,
+        )
+
+    async def _session(self, pipeline: VoicePipeline) -> None:
+        """Один жизненный цикл соединения: манифест → подписки → consume + пайплайн."""
+        offline = _build_manifest(self._device_id, online=False)
+        will = aiomqtt.Will(
+            topic=registry_topic(self._device_id),
+            payload=offline.model_dump_json().encode(),
+            qos=1,
+            retain=True,
+        )
 
         async with Bus(self._bus_settings, client_id=self._device_id, will=will) as bus:
             self._bus = bus
-            pipeline = self._build_pipeline()
-            if pipeline is None:
-                return
-
             online = _build_manifest(self._device_id, online=True)
             await bus.publish_model(registry_topic(self._device_id), online, retain=True)
             await bus.subscribe(USER_REPLY_WILDCARD)
@@ -272,7 +295,11 @@ class VoiceApp:
             log.info("Голосовой агент подключён, слушаю reply + команды say")
 
             try:
-                await asyncio.gather(self._consume(), pipeline.run())
+                # TaskGroup (в отличие от gather) отменяет соседа при падении одной задачи:
+                # разрыв шины не оставляет пайплайн работать сиротой.
+                async with asyncio.TaskGroup() as tg:
+                    tg.create_task(self._consume())
+                    tg.create_task(pipeline.run())
             finally:
                 with contextlib.suppress(Exception):
                     await bus.publish_model(

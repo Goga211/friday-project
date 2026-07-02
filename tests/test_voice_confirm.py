@@ -107,7 +107,9 @@ async def test_voice_confirm_declined_flow() -> None:
     app._handle_reply(
         AssistantReply(
             correlation_id=msg.id, text="Подтверди удаление", pending=[_pending_action()]
-        ).model_dump_json().encode()
+        )
+        .model_dump_json()
+        .encode()
     )
     await task
 
@@ -117,9 +119,9 @@ async def test_voice_confirm_declined_flow() -> None:
     assert isinstance(decision, ConfirmDecision)
     assert decision.approved is False
     app._handle_reply(
-        AssistantReply(
-            correlation_id=decision.reply_id, text="Отменено, ничего не выполнено."
-        ).model_dump_json().encode()
+        AssistantReply(correlation_id=decision.reply_id, text="Отменено, ничего не выполнено.")
+        .model_dump_json()
+        .encode()
     )
     assert await task2 == "Отменено, ничего не выполнено."
 

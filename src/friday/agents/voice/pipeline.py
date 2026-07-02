@@ -71,28 +71,39 @@ class VoicePipeline:
             min_phrase_seconds=settings.min_phrase_seconds,
             max_phrase_seconds=settings.max_phrase_seconds,
         )
+        # Фоновая задача воспроизведения ответа (state SPEAK) — атрибут, чтобы при отмене
+        # run() снаружи (разрыв шины/выход) не оставить воспроизведение сиротой.
+        self._speaking: asyncio.Task[None] | None = None
 
     async def run(self) -> None:
+        log.info("голосовой пайплайн запущен, слушаю wake-word")
+        try:
+            await self._run_loop()
+        except asyncio.CancelledError:
+            if self._speaking is not None:
+                await self._cancel_speech(self._speaking)
+                self._speaking = None
+            raise
+
+    async def _run_loop(self) -> None:
         state = _State.WAIT
         buffer = bytearray()
-        speaking: asyncio.Task[None] | None = None
-        log.info("голосовой пайплайн запущен, слушаю wake-word")
 
         async for frame in self._source.frames():
             if state is _State.SPEAK:
-                assert speaking is not None
+                assert self._speaking is not None
                 # barge-in: пользователь перебил новым wake-word во время ответа.
                 if self._barge_in and self._wake.process(frame) >= self._settings.wake_threshold:
                     log.info("wake-word во время ответа — прерываю (barge-in), пишу новую фразу")
-                    await self._cancel_speech(speaking)
-                    speaking = None
+                    await self._cancel_speech(self._speaking)
+                    self._speaking = None
                     self._endpointer.reset()
                     buffer.clear()
                     state = _State.RECORD
                     continue
-                if speaking.done():
-                    await self._finish_speech(speaking)
-                    speaking = None
+                if self._speaking.done():
+                    await self._finish_speech(self._speaking)
+                    self._speaking = None
                     self._wake.reset()
                     state = _State.WAIT
                 continue
@@ -112,14 +123,16 @@ class VoicePipeline:
                 buffer.clear()
                 if reply:
                     self._wake.reset()  # чистим детектор перед прослушкой barge-in
-                    speaking = asyncio.create_task(self._speak(reply))
+                    self._speaking = asyncio.create_task(self._speak(reply))
                     state = _State.SPEAK
                 else:
                     self._wake.reset()
                     state = _State.WAIT
 
-        if speaking is not None:  # источник иссяк во время ответа — дослушиваем воспроизведение
-            await self._finish_speech(speaking)
+        # источник иссяк во время ответа — дослушиваем воспроизведение
+        if self._speaking is not None:
+            await self._finish_speech(self._speaking)
+            self._speaking = None
             self._wake.reset()
 
     async def _handle_phrase(self, pcm: bytes) -> str | None:

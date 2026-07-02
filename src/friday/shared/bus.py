@@ -1,12 +1,16 @@
 """Тонкая async-обёртка над MQTT-клиентом (aiomqtt).
 
 Не прячет aiomqtt целиком — только даёт удобный publish/subscribe для Pydantic-моделей,
-сборку клиента из настроек (включая TLS) и поток входящих сообщений.
+сборку клиента из настроек (включая TLS) и поток входящих сообщений. Плюс
+run_with_reconnect — цикл жизни агента с авто-переподключением при разрывах.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+import logging
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from types import TracebackType
 from typing import Self
 
@@ -14,6 +18,46 @@ import aiomqtt
 from pydantic import BaseModel
 
 from friday.shared.config import BusSettings
+
+log = logging.getLogger("friday.bus")
+
+# Сколько секунд сессия должна прожить, чтобы считать связь стабильной и сбросить backoff.
+STABLE_SESSION_SECONDS = 60.0
+
+
+async def run_with_reconnect(
+    session: Callable[[], Awaitable[None]],
+    *,
+    initial_delay: float = 1.0,
+    max_delay: float = 60.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+) -> None:
+    """Крутит session() с авто-переподключением при разрывах MQTT.
+
+    session — один жизненный цикл соединения (connect → subscribe → цикл сообщений).
+    Штатный return из session завершает и этот цикл. При MqttError (в том числе внутри
+    ExceptionGroup, если сессия построена на TaskGroup) ждём с экспоненциальным backoff
+    и заходим снова; после стабильной сессии задержка сбрасывается. Прочие ошибки —
+    наружу: это баги, а не сетевые сбои.
+    """
+    delay = initial_delay
+    while True:
+        started = time.monotonic()
+        try:
+            await session()
+            return
+        except aiomqtt.MqttError as exc:
+            error: BaseException = exc
+        except BaseExceptionGroup as eg:
+            mqtt_only, rest = eg.split(aiomqtt.MqttError)
+            if rest is not None or mqtt_only is None:
+                raise
+            error = mqtt_only
+        if time.monotonic() - started >= STABLE_SESSION_SECONDS:
+            delay = initial_delay
+        log.warning("MQTT-разрыв: %s — переподключение через %.1f с", error, delay)
+        await sleep(delay)
+        delay = min(delay * 2, max_delay)
 
 
 class Bus:
