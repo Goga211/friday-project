@@ -52,7 +52,11 @@ class ToolRouter:
         return {"name": cap.name, "description": description, "input_schema": schema}
 
     def tool_definitions(self) -> list[dict[str, Any]]:
-        """Инструменты для Claude: локальные (Core) + возможности онлайн-устройств (без дублей)."""
+        """Инструменты для Claude: локальные (Core) + возможности онлайн-устройств (без дублей).
+
+        Отсортированы по имени: prompt caching — префиксный, недетерминированный порядок
+        инструментов молча инвалидировал бы кэш system+tools на каждом запросе.
+        """
         tools: list[dict[str, Any]] = []
         seen: set[str] = set()
         for cap, _handler in self._local.values():
@@ -66,6 +70,7 @@ class ToolRouter:
                     continue
                 seen.add(cap.name)
                 tools.append(self._tool_def(cap))
+        tools.sort(key=lambda t: str(t["name"]))
         return tools
 
     def _find_device(self, action: str) -> tuple[str | None, Capability | None]:

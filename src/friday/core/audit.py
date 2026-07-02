@@ -1,4 +1,9 @@
-"""Аудит действий: каждое выполнение инструмента пишется в SQLite (кто/что/когда/результат)."""
+"""Аудит и лог диалога: SQLite.
+
+- audit — каждое выполнение инструмента (кто/что/когда/результат);
+- dialog — реплики пользователя и ассистента (история переживает рестарт Core:
+  последние N реплик подгружаются в контекст мозга при старте).
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,30 @@ class AuditLog:
                 error   TEXT
             )
             """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS dialog(
+                id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts    TEXT NOT NULL,
+                role  TEXT NOT NULL,
+                text  TEXT NOT NULL
+            )
+            """)
         self._conn.commit()
+
+    def record_dialog(self, role: str, text: str) -> None:
+        """Записать реплику диалога (role: user | assistant)."""
+        self._conn.execute(
+            "INSERT INTO dialog(ts, role, text) VALUES(?,?,?)",
+            (datetime.now(UTC).isoformat(), role, text),
+        )
+        self._conn.commit()
+
+    def recent_dialog(self, limit: int) -> list[tuple[str, str]]:
+        """Последние реплики диалога в хронологическом порядке: [(role, text), …]."""
+        rows = self._conn.execute(
+            "SELECT role, text FROM dialog ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [(role, text) for role, text in reversed(rows)]
 
     def record(
         self,

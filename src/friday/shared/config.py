@@ -39,6 +39,8 @@ class BusSettings(BaseSettings):
     llm_model: str = "claude-haiku-4-5"
     llm_max_tokens: int = 2048
     llm_max_iterations: int = 8
+    # Сколько последних реплик диалога держать в контексте мозга (user+assistant вместе)
+    llm_history_max_messages: int = 20
 
     # Файл аудита действий (SQLite)
     audit_db: str = "friday.db"

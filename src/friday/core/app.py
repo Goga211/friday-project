@@ -70,7 +70,13 @@ class Core:
                 model=settings.llm_model,
                 max_tokens=settings.llm_max_tokens,
                 max_iterations=settings.llm_max_iterations,
+                history_max_messages=settings.llm_history_max_messages,
             )
+            # Контекст диалога переживает рестарт: поднимаем последние реплики из SQLite.
+            restored = self.audit.recent_dialog(settings.llm_history_max_messages)
+            if restored:
+                self.brain.preload_history(restored)
+                log.info("восстановлен контекст диалога: %d реплик", len(restored))
         else:
             log.warning("ANTHROPIC_API_KEY не задан — мозг отключён (только реестр/ping)")
 
@@ -127,6 +133,9 @@ class Core:
             except Exception as exc:  # noqa: BLE001 — не роняем Core на ошибке запроса
                 log.exception("ошибка обработки запроса")
                 text = f"Ошибка обработки запроса: {exc}"
+            else:
+                self.audit.record_dialog("user", msg.text)
+                self.audit.record_dialog("assistant", text)
         if pending:
             self._pending_confirm[msg.id] = pending
         reply = AssistantReply(correlation_id=msg.id, text=text, pending=pending)
@@ -148,6 +157,14 @@ class Core:
             text = "Отменено, ничего не выполнено."
         else:
             text = await self._run_confirmed(pending)
+        if pending is not None:
+            # Итог подтверждения — тоже часть диалога: мозг должен знать, что действие
+            # выполнено/отменено (иначе для него оно осталось «ждёт подтверждения»).
+            user_word = "да" if decision.approved else "нет"
+            if self.brain is not None:
+                self.brain.remember(user_word, text)
+            self.audit.record_dialog("user", user_word)
+            self.audit.record_dialog("assistant", text)
         reply = AssistantReply(correlation_id=decision.reply_id, text=text)
         await self._publish_reply(decision.reply_id, reply)
         log.info("→ ответ на подтверждение (id=%s): %s", decision.reply_id[:8], text)
