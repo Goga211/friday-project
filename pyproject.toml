@@ -38,6 +38,7 @@ voice = [
     "scikit-learn>=1",
     "tqdm>=4",
     "requests>=2",
+    "yandex-speechkit>=1.5",  # TTS v3 (gRPC): нейроголоса современнее v1 REST
 ]
 
 [project.scripts]
@@ -69,7 +70,7 @@ plugins = ["pydantic.mypy"]
 
 # Зависимости без типовых стабов — игнорируем отсутствие стабов.
 [[tool.mypy.overrides]]
-module = ["openwakeword.*", "sounddevice", "numpy", "apscheduler.*"]
+module = ["openwakeword.*", "sounddevice", "numpy", "apscheduler.*", "speechkit.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

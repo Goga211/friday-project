@@ -79,4 +79,8 @@ def build_synthesizer(settings: VoiceSettings) -> SpeechSynthesizer:
         from friday.agents.voice.providers.yandex_tts import YandexSpeechSynthesizer
 
         return YandexSpeechSynthesizer(settings)
+    if settings.tts == "yandex_v3":
+        from friday.agents.voice.providers.yandex_v3_tts import YandexV3SpeechSynthesizer
+
+        return YandexV3SpeechSynthesizer(settings)
     raise ValueError(f"неизвестный TTS-провайдер: {settings.tts}")
