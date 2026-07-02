@@ -61,12 +61,17 @@ class MicSource:
 class SpeakerSink:
     def __init__(self, settings: VoiceSettings) -> None:
         self._device = _device(settings.output_device)
+        self._gain = settings.tts_volume
 
     async def play(self, clip: AudioClip) -> None:
         import numpy as np
         import sounddevice as sd
 
         samples = np.frombuffer(clip.pcm, dtype=np.int16)
+        if self._gain != 1.0:
+            # тише и без клиппинга: масштабируем во float, обрезаем по int16, обратно в int16
+            scaled = samples.astype(np.float32) * self._gain
+            samples = np.clip(scaled, -32768.0, 32767.0).astype(np.int16)
 
         def _blocking() -> None:
             sd.play(samples, clip.sample_rate, device=self._device)

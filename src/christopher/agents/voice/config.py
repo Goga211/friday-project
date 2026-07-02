@@ -48,6 +48,8 @@ class VoiceSettings(BaseSettings):
     # --- Аудио-устройства (None → системные по умолчанию) ---
     input_device: str | None = None
     output_device: str | None = None
+    # Громкость воспроизведения TTS (гейн): <1 тише и убирает клиппинг/искажение, 1.0 = как есть.
+    tts_volume: float = 0.6
 
     # --- Таймаут ожидания ответа мозга на фразу, сек ---
     reply_timeout: float = 60.0
