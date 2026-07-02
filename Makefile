@@ -1,4 +1,4 @@
-.PHONY: help venv install install-voice install-hud piper lint fmt typecheck test broker broker-down core desktop cli voice hud
+.PHONY: help venv install install-voice install-hud piper lint fmt typecheck test certs broker broker-down core desktop cli voice hud
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -37,7 +37,10 @@ typecheck:
 test:
 	$(VENV)/bin/pytest
 
-broker:
+certs:
+	@test -f infra/certs/ca.crt || bash infra/scripts/gen-certs.sh
+
+broker: certs
 	cd infra && docker compose up -d
 
 broker-down:

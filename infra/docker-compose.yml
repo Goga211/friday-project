@@ -1,7 +1,7 @@
 services:
   mosquitto:
     image: eclipse-mosquitto:2
-    container_name: christopher-mosquitto
+    container_name: friday-mosquitto
     ports:
       - "1883:1883"   # MQTT (dev, plaintext)
       - "8883:8883"   # MQTT over TLS (после настройки mTLS)
