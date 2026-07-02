@@ -35,10 +35,16 @@ class VoiceSettings(BaseSettings):
     min_phrase_seconds: float = 0.3  # короче — считаем ложным срабатыванием
     max_phrase_seconds: float = 15.0  # жёсткий потолок (Yandex sync ≤ 30 с / 1 МБ)
 
-    # --- Yandex SpeechKit (STT) ---
+    # --- Yandex SpeechKit (STT + TTS, один ключ/folder) ---
     yandex_api_key: str | None = None
     yandex_folder_id: str | None = None
     yandex_lang: str = "ru-RU"
+
+    # --- Yandex TTS (нейроголоса; список голосов см. в доке SpeechKit) ---
+    yandex_tts_voice: str = "filipp"  # напр. filipp, ermil, zahar (муж) / alena, jane, omazh (жен)
+    yandex_tts_emotion: str = "neutral"  # neutral | good | evil (доступность зависит от голоса)
+    yandex_tts_speed: float = 1.0  # 0.1..3.0
+    yandex_tts_sample_rate: int = 48000  # lpcm: 8000 | 16000 | 48000
 
     # --- Piper (TTS) ---
     piper_bin: str = "piper"

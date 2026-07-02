@@ -75,4 +75,8 @@ def build_synthesizer(settings: VoiceSettings) -> SpeechSynthesizer:
         from christopher.agents.voice.providers.piper_tts import PiperSpeechSynthesizer
 
         return PiperSpeechSynthesizer(settings)
+    if settings.tts == "yandex":
+        from christopher.agents.voice.providers.yandex_tts import YandexSpeechSynthesizer
+
+        return YandexSpeechSynthesizer(settings)
     raise ValueError(f"неизвестный TTS-провайдер: {settings.tts}")
