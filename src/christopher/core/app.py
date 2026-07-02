@@ -183,17 +183,35 @@ class Core:
     # --- планировщик (Scheduler): отложенные/повторяющиеся действия ---
     async def _fire_scheduled(self, target: str, action: str, params: dict[str, object]) -> None:
         """Срабатывание задачи: публикуем команду устройству (пользователь авторизовал при
-        планировании → requires_confirm=True). Fire-and-forget, ответа не ждём."""
+        планировании → requires_confirm=True). Fire-and-forget, ответа не ждём.
+
+        target из плана — лишь подсказка (мозг не всегда знает id устройств), поэтому
+        резолвим реальное онлайн-устройство по возможности. Если его нет — НЕ теряем молча,
+        а логируем предупреждение (задача сработала, но доставить некуда)."""
+        device_id = self.router.resolve_target(target, action)
+        if device_id is None:
+            log.warning(
+                "scheduler: '%s' сработало, но нет онлайн-устройства с возможностью "
+                "(подсказка target=%s) — команда не отправлена",
+                action,
+                target,
+            )
+            return
         cmd = Command(
-            source=CORE_ID, target=target, action=action, params=dict(params), requires_confirm=True
+            source=CORE_ID,
+            target=device_id,
+            action=action,
+            params=dict(params),
+            requires_confirm=True,
         )
-        await self._bus_or_raise.publish_model(cmd_topic(target), cmd)
+        await self._bus_or_raise.publish_model(cmd_topic(device_id), cmd)
+        log.info("scheduler: команда %s → %s отправлена", action, device_id)
 
     async def _tool_schedule_action(self, params: dict[str, object]) -> dict[str, object]:
-        target = str(params.get("target", "")).strip()
+        target = str(params.get("target", "")).strip()  # необязательная подсказка устройства
         action = str(params.get("action", "")).strip()
-        if not target or not action:
-            raise ValueError("нужны параметры target и action")
+        if not action:
+            raise ValueError("нужен параметр action (имя навыка)")
         payload = params.get("params") or {}
         if not isinstance(payload, dict):
             raise ValueError("params должен быть объектом")
@@ -207,11 +225,11 @@ class Core:
         return {"id": job_id, "next_run": run_at.isoformat()}
 
     async def _tool_schedule_cron(self, params: dict[str, object]) -> dict[str, object]:
-        target = str(params.get("target", "")).strip()
+        target = str(params.get("target", "")).strip()  # необязательная подсказка устройства
         action = str(params.get("action", "")).strip()
         cron = str(params.get("cron", "")).strip()
-        if not target or not action or not cron:
-            raise ValueError("нужны параметры target, action и cron")
+        if not action or not cron:
+            raise ValueError("нужны параметры action (имя навыка) и cron")
         payload = params.get("params") or {}
         if not isinstance(payload, dict):
             raise ValueError("params должен быть объектом")
@@ -238,20 +256,23 @@ class Core:
             Capability(
                 name="schedule_action",
                 description=(
-                    "Отложенное действие: выполнить action на устройстве target через "
-                    "delay_seconds секунд ИЛИ в момент at (ISO-время). params — аргументы действия"
+                    "Отложенное действие: выполнить навык action через delay_seconds секунд "
+                    "ИЛИ в момент at (ISO-время). action — имя навыка (например notify, "
+                    "run_command) как в остальных инструментах. params — аргументы навыка. "
+                    "target указывать НЕ нужно: устройство подбирается автоматически по навыку "
+                    "(укажи только если нужно конкретное устройство по его id)"
                 ),
                 risk=RiskLevel.safe,
                 params_schema={
                     "type": "object",
                     "properties": {
-                        "target": {"type": "string"},
                         "action": {"type": "string"},
                         "params": obj_schema,
                         "delay_seconds": {"type": "integer"},
                         "at": {"type": "string"},
+                        "target": {"type": "string"},
                     },
-                    "required": ["target", "action"],
+                    "required": ["action"],
                 },
             ),
             self._tool_schedule_action,
@@ -260,19 +281,20 @@ class Core:
             Capability(
                 name="schedule_cron",
                 description=(
-                    "Повторяющееся действие по cron-выражению (5 полей). "
-                    "Выполняет action на target с params по расписанию cron"
+                    "Повторяющееся действие по cron-выражению (5 полей). Выполняет навык action "
+                    "с params по расписанию. target указывать НЕ нужно — устройство подбирается "
+                    "по навыку автоматически (укажи только для конкретного устройства по id)"
                 ),
                 risk=RiskLevel.safe,
                 params_schema={
                     "type": "object",
                     "properties": {
-                        "target": {"type": "string"},
                         "action": {"type": "string"},
                         "params": obj_schema,
                         "cron": {"type": "string"},
+                        "target": {"type": "string"},
                     },
-                    "required": ["target", "action", "cron"],
+                    "required": ["action", "cron"],
                 },
             ),
             self._tool_schedule_cron,

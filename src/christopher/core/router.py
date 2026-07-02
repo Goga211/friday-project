@@ -77,6 +77,24 @@ class ToolRouter:
                     return device_id, cap
         return None, None
 
+    def resolve_target(self, hint: str | None, action: str) -> str | None:
+        """Найти онлайн-устройство для действия (для отложенного запуска планировщиком).
+
+        Сначала пробуем hint (если это реальное онлайн-устройство с нужной возможностью —
+        мозг мог указать конкретное устройство). Иначе резолвим по возможности, как при
+        немедленном вызове. None — если подходящего онлайн-устройства нет.
+        """
+        if hint:
+            rec = self._registry.all().get(hint)
+            if (
+                rec is not None
+                and rec.manifest.online
+                and any(cap.name == action for cap in rec.manifest.capabilities)
+            ):
+                return hint
+        device_id, _cap = self._find_device(action)
+        return device_id
+
     @staticmethod
     def _summary(action: str, params: dict[str, Any]) -> str:
         args = ", ".join(f"{k}={v!r}" for k, v in params.items())

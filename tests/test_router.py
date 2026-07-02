@@ -43,6 +43,44 @@ def test_tool_definitions_marks_risky() -> None:
     assert "подтверждения" in tools[0]["description"]
 
 
+async def _noop_caller(dev: str, act: str, params: dict, confirm: bool) -> Response:
+    return Response(correlation_id="x", source=dev, ok=True)
+
+
+def test_resolve_target_by_capability_when_hint_bogus() -> None:
+    # Планировщик: мозг подставил несуществующий target ("system") — резолвим по навыку.
+    reg = _registry_with(Capability(name="notify", description="увед", risk=RiskLevel.safe))
+    router = ToolRouter(reg, _noop_caller)
+    assert router.resolve_target("system", "notify") == "d1"
+
+
+def test_resolve_target_prefers_valid_hint() -> None:
+    reg = DeviceRegistry()
+    reg.update(
+        CapabilityManifest(
+            device_id="d1",
+            platform="linux",
+            capabilities=[Capability(name="notify", description="увед", risk=RiskLevel.safe)],
+        )
+    )
+    reg.update(
+        CapabilityManifest(
+            device_id="d2",
+            platform="linux",
+            capabilities=[Capability(name="notify", description="увед", risk=RiskLevel.safe)],
+        )
+    )
+    router = ToolRouter(reg, _noop_caller)
+    # hint валиден (онлайн + есть навык) — используем именно его, а не первое попавшееся
+    assert router.resolve_target("d2", "notify") == "d2"
+
+
+def test_resolve_target_none_when_no_device() -> None:
+    reg = DeviceRegistry()
+    router = ToolRouter(reg, _noop_caller)
+    assert router.resolve_target("system", "notify") is None
+
+
 @pytest.mark.asyncio
 async def test_execute_routes_to_device() -> None:
     reg = _registry_with(Capability(name="ping", description="живость", risk=RiskLevel.safe))
