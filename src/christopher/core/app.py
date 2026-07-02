@@ -21,6 +21,7 @@ from christopher.core.router import ToolRouter
 from christopher.core.scheduler import ActionScheduler, parse_when
 from christopher.shared.bus import Bus
 from christopher.shared.config import BusSettings
+from christopher.shared.env import load_env
 from christopher.shared.logging import setup_logging
 from christopher.shared.protocol import (
     AssistantReply,
@@ -346,6 +347,7 @@ class Core:
 
 
 async def run() -> None:
+    load_env()
     setup_logging()
     await Core(BusSettings()).run()
 
