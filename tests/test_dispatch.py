@@ -1,7 +1,7 @@
 import pytest
 
-from friday.agents.desktop.app import dispatch
 from friday.agents.desktop.capabilities import REGISTRY
+from friday.shared.agent import dispatch
 from friday.shared.protocol import Command
 
 
@@ -22,7 +22,7 @@ async def test_system_info_capability() -> None:
 @pytest.mark.asyncio
 async def test_dispatch_known_action_ok() -> None:
     cmd = Command(source="core", target="d", action="ping")
-    resp = await dispatch(cmd)
+    resp = await dispatch(cmd, REGISTRY)
     assert resp.ok is True
     assert resp.result == {"pong": True}
     assert resp.correlation_id == cmd.id
@@ -31,6 +31,6 @@ async def test_dispatch_known_action_ok() -> None:
 @pytest.mark.asyncio
 async def test_dispatch_unknown_action_fails() -> None:
     cmd = Command(source="core", target="d", action="does_not_exist")
-    resp = await dispatch(cmd)
+    resp = await dispatch(cmd, REGISTRY)
     assert resp.ok is False
     assert resp.error is not None
