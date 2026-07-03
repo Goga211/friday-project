@@ -17,6 +17,7 @@ from anthropic import AsyncAnthropic
 
 from friday.core.audit import AuditLog
 from friday.core.brain import Brain
+from friday.core.memory import KINDS, Fact, MemoryStore, select_relevant
 from friday.core.push import push_notify
 from friday.core.registry import DeviceRegistry
 from friday.core.router import ToolRouter
@@ -74,9 +75,12 @@ class Core:
         self.router = ToolRouter(self.registry, self._call_device, self.audit)
         self._setup_device_tools()
         self.brain: Brain | None = None
+        self.memory = MemoryStore(settings.audit_db)
+        self._llm_client: AsyncAnthropic | None = None
         if os.getenv("ANTHROPIC_API_KEY"):
+            self._llm_client = AsyncAnthropic()
             self.brain = Brain(
-                AsyncAnthropic(),
+                self._llm_client,
                 model=settings.llm_model,
                 max_tokens=settings.llm_max_tokens,
                 max_iterations=settings.llm_max_iterations,
@@ -87,6 +91,8 @@ class Core:
             if restored:
                 self.brain.preload_history(restored)
                 log.info("восстановлен контекст диалога: %d реплик", len(restored))
+            # Долгосрочная память: recall/forget зовут модель-селектор — только при ключе.
+            self._setup_memory_tools()
         else:
             log.warning("ANTHROPIC_API_KEY не задан — мозг отключён (только реестр/ping)")
 
@@ -431,6 +437,105 @@ class Core:
                 self._tool_notify_phone,
             )
 
+    # --- долгосрочная память (Phase 5): remember / recall / forget ---
+
+    async def _tool_remember(self, params: dict[str, object]) -> dict[str, object]:
+        text = str(params.get("text", "")).strip()
+        if not text:
+            raise ValueError("нужен параметр text — сам факт")
+        kind = str(params.get("kind", "fact")).strip() or "fact"
+        if kind not in KINDS:
+            raise ValueError(f"kind должен быть одним из: {', '.join(KINDS)}")
+        fact_id = self.memory.remember(text, kind=kind)
+        return {"remembered": True, "id": fact_id}
+
+    async def _select_facts(self, query: str) -> list[Fact]:
+        assert self._llm_client is not None  # инструменты регистрируются только с ключом
+        return await select_relevant(
+            self._llm_client,
+            self.settings.llm_memory_model,
+            self.memory.active_facts(),
+            query,
+        )
+
+    async def _tool_recall(self, params: dict[str, object]) -> dict[str, object]:
+        query = str(params.get("query", "")).strip()
+        if not query:
+            raise ValueError("нужен параметр query — что ищем в памяти")
+        facts = await self._select_facts(query)
+        if not facts:
+            return {"facts": [], "note": "в памяти ничего подходящего не нашлось"}
+        return {
+            "facts": [{"text": f.text, "kind": f.kind, "when": f.created_at[:10]} for f in facts]
+        }
+
+    async def _tool_forget(self, params: dict[str, object]) -> dict[str, object]:
+        query = str(params.get("query", "")).strip()
+        if not query:
+            raise ValueError("нужен параметр query — что забыть")
+        facts = await self._select_facts(query)
+        if not facts:
+            return {"forgotten": [], "note": "в памяти ничего подходящего не нашлось"}
+        self.memory.forget([f.id for f in facts])
+        return {"forgotten": [f.text for f in facts]}
+
+    def _setup_memory_tools(self) -> None:
+        text_schema = {"type": "string"}
+        self.router.register_local(
+            Capability(
+                name="remember",
+                description=(
+                    "Сохранить факт в долгосрочную память (params: text — сам факт, "
+                    "сформулированный самодостаточно; kind: fact|preference|decision, опц.). "
+                    "Используй, когда пользователь просит запомнить или сообщает что-то, "
+                    "что пригодится в будущих разговорах"
+                ),
+                risk=RiskLevel.safe,
+                params_schema={
+                    "type": "object",
+                    "properties": {
+                        "text": text_schema,
+                        "kind": {"type": "string", "enum": list(KINDS)},
+                    },
+                    "required": ["text"],
+                },
+            ),
+            self._tool_remember,
+        )
+        self.router.register_local(
+            Capability(
+                name="recall",
+                description=(
+                    "Поискать в долгосрочной памяти (params: query). Используй, когда "
+                    "пользователь спрашивает о прошлых фактах, предпочтениях или "
+                    "договорённостях, которых нет в текущем диалоге"
+                ),
+                risk=RiskLevel.safe,
+                params_schema={
+                    "type": "object",
+                    "properties": {"query": text_schema},
+                    "required": ["query"],
+                },
+            ),
+            self._tool_recall,
+        )
+        self.router.register_local(
+            Capability(
+                name="forget",
+                description=(
+                    "Забыть факты из долгосрочной памяти по описанию (params: query). "
+                    "Перечисли пользователю, что именно забыто"
+                ),
+                risk=RiskLevel.safe,
+                params_schema={
+                    "type": "object",
+                    "properties": {"query": text_schema},
+                    "required": ["query"],
+                },
+            ),
+            self._tool_forget,
+        )
+
     def _setup_scheduler(self) -> None:
         self._scheduler = ActionScheduler(self.settings.scheduler_db, self._fire_scheduled)
         self._scheduler.start()
@@ -535,6 +640,7 @@ class Core:
                 self._scheduler.shutdown()
             self.registry.close()
             self.audit.close()
+            self.memory.close()
 
     async def _session(self) -> None:
         """Один жизненный цикл соединения: connect → subscribe → цикл сообщений."""
