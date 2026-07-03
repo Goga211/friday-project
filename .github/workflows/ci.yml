@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Ставим то же окружение, что и локально (make install-voice + install-hud):
+      # mypy strict с warn_unused_ignores зависит от реально установленных пакетов.
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev,voice,hud]"
+          # openWakeWord без deps: его tflite-runtime не собирается под py312, мы на ONNX
+          python -m pip install "openwakeword>=0.6" --no-deps
+
+      - name: Lint (ruff)
+        run: ruff check src tests
+
+      - name: Format (black --check)
+        run: black --check src tests
+
+      - name: Typecheck (mypy)
+        run: mypy src
+
+      - name: Test (pytest)
+        run: pytest
