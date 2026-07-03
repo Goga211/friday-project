@@ -23,6 +23,14 @@ class BusSettings(BaseSettings):
 
     # Идентификатор устройства (для агента). Пусто → desktop-<hostname>.
     device_id: str | None = None
+    # Человеческое имя устройства («ноутбук», «пк») — для команд вида «открой на ноутбуке»
+    device_alias: str | None = None
+    # MAC для Wake-on-LAN. Пусто → автодетект (uuid.getnode); задать, если детект врёт
+    device_mac: str | None = None
+
+    # Wake-on-LAN: куда слать магический пакет
+    wol_broadcast: str = "255.255.255.255"
+    wol_port: int = 9
 
     # Интервал ping от Core к агентам, сек
     ping_interval: int = 15
@@ -45,6 +53,14 @@ class BusSettings(BaseSettings):
     # Веб-чат (зачаток HUD): адрес HTTP-сервера
     hud_host: str = "127.0.0.1"
     hud_port: int = 8010
+    # Bearer-токен REST API HUD (/api/* — для iPhone Shortcuts). Не задан → API отключён
+    hud_token: str | None = None
+    # Таймаут ожидания ответа мозга в REST API HUD, сек
+    hud_api_timeout: float = 60.0
+
+    # Push-уведомления на телефон: полный URL приватного ntfy-топика
+    # (например https://ntfy.sh/friday-<секрет>). Не задан → инструмент notify_phone отключён
+    push_url: str | None = None
 
     # Файл аудита действий (SQLite)
     audit_db: str = "friday.db"

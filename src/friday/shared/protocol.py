@@ -47,6 +47,10 @@ class CapabilityManifest(BaseModel):
     online: bool = True
     ts: datetime = Field(default_factory=_now)
     capabilities: list[Capability] = Field(default_factory=list)
+    # Человеческое имя устройства («ноутбук», «пк») — для маршрутизации по цели.
+    alias: str | None = None
+    # MAC сетевой карты — для Wake-on-LAN, когда устройство выключено.
+    mac: str | None = None
 
 
 class Command(BaseModel):

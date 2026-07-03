@@ -19,6 +19,7 @@ from friday.agents.desktop.capabilities import REGISTRY, manifest_capabilities
 from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.logging import setup_logging
+from friday.shared.net import detect_mac
 from friday.shared.protocol import CapabilityManifest, Command, Response, RiskLevel
 from friday.shared.topics import cmd_topic, registry_topic, resp_topic
 
@@ -29,12 +30,14 @@ def _default_device_id() -> str:
     return f"desktop-{platform.node() or 'unknown'}"
 
 
-def _build_manifest(device_id: str, online: bool) -> CapabilityManifest:
+def _build_manifest(settings: BusSettings, device_id: str, online: bool) -> CapabilityManifest:
     return CapabilityManifest(
         device_id=device_id,
         platform=platform.system().lower(),
         online=online,
         capabilities=manifest_capabilities(),
+        alias=settings.device_alias,
+        mac=settings.device_mac or detect_mac(),
     )
 
 
@@ -87,7 +90,7 @@ async def run() -> None:
 
 async def _session(settings: BusSettings, device_id: str) -> None:
     """Один жизненный цикл соединения: манифест → подписка → цикл команд."""
-    offline = _build_manifest(device_id, online=False)
+    offline = _build_manifest(settings, device_id, online=False)
     will = aiomqtt.Will(
         topic=registry_topic(device_id),
         payload=offline.model_dump_json().encode(),
@@ -96,7 +99,7 @@ async def _session(settings: BusSettings, device_id: str) -> None:
     )
 
     async with Bus(settings, client_id=device_id, will=will) as bus:
-        online = _build_manifest(device_id, online=True)
+        online = _build_manifest(settings, device_id, online=True)
         await bus.publish_model(registry_topic(device_id), online, retain=True)
         await bus.subscribe(cmd_topic(device_id))
         log.info(
@@ -118,7 +121,7 @@ async def _session(settings: BusSettings, device_id: str) -> None:
             with contextlib.suppress(Exception):
                 await bus.publish_model(
                     registry_topic(device_id),
-                    _build_manifest(device_id, online=False),
+                    _build_manifest(settings, device_id, online=False),
                     retain=True,
                 )
 

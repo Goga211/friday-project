@@ -53,7 +53,9 @@ CORE_ID = "friday-core"
 class Core:
     def __init__(self, settings: BusSettings) -> None:
         self.settings = settings
-        self.registry = DeviceRegistry()
+        # Реестр персистентный (та же SQLite, что и аудит): alias/MAC выключенных
+        # устройств переживают рестарт Hub'а — их можно будить по WoL.
+        self.registry = DeviceRegistry(settings.audit_db)
         self.audit = AuditLog(settings.audit_db)
         self._bus: Bus | None = None
         self._pending: dict[str, asyncio.Future[Response]] = {}
@@ -63,6 +65,7 @@ class Core:
         self._tasks: set[asyncio.Task[None]] = set()
 
         self.router = ToolRouter(self.registry, self._call_device, self.audit)
+        self._setup_device_tools()
         self.brain: Brain | None = None
         if os.getenv("ANTHROPIC_API_KEY"):
             self.brain = Brain(
@@ -283,6 +286,35 @@ class Core:
         assert self._scheduler is not None
         return {"jobs": self._scheduler.list_jobs()}
 
+    # --- устройства: обзор для мозга ---
+    async def _tool_list_devices(self, params: dict[str, object]) -> dict[str, object]:
+        devices: list[dict[str, object]] = []
+        for device_id, rec in sorted(self.registry.all().items()):
+            manifest = rec.manifest
+            devices.append(
+                {
+                    "id": device_id,
+                    "alias": manifest.alias,
+                    "platform": manifest.platform,
+                    "online": manifest.online,
+                    "capabilities": [cap.name for cap in manifest.capabilities],
+                }
+            )
+        return {"devices": devices}
+
+    def _setup_device_tools(self) -> None:
+        self.router.register_local(
+            Capability(
+                name="list_devices",
+                description=(
+                    "Список всех известных устройств: id, алиас, платформа, online, "
+                    "возможности. Офлайн-устройства тоже видны (их можно разбудить)"
+                ),
+                risk=RiskLevel.safe,
+            ),
+            self._tool_list_devices,
+        )
+
     def _setup_scheduler(self) -> None:
         self._scheduler = ActionScheduler(self.settings.scheduler_db, self._fire_scheduled)
         self._scheduler.start()
@@ -385,6 +417,7 @@ class Core:
         finally:
             if self._scheduler is not None:
                 self._scheduler.shutdown()
+            self.registry.close()
             self.audit.close()
 
     async def _session(self) -> None:

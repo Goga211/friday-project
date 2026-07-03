@@ -33,3 +33,20 @@ def test_manifest_roundtrip() -> None:
     restored = CapabilityManifest.model_validate_json(manifest.model_dump_json())
     assert restored.online is True
     assert restored.capabilities[0].risk is RiskLevel.safe
+
+
+def test_manifest_alias_and_mac_roundtrip() -> None:
+    manifest = CapabilityManifest(
+        device_id="d", platform="linux", alias="ноутбук", mac="AA:BB:CC:DD:EE:FF"
+    )
+    restored = CapabilityManifest.model_validate_json(manifest.model_dump_json())
+    assert restored.alias == "ноутбук"
+    assert restored.mac == "AA:BB:CC:DD:EE:FF"
+
+
+def test_manifest_without_alias_mac_still_valid() -> None:
+    # Совместимость: старые retained-манифесты без новых полей должны валидироваться.
+    old_json = '{"device_id": "d", "platform": "linux"}'
+    restored = CapabilityManifest.model_validate_json(old_json)
+    assert restored.alias is None
+    assert restored.mac is None
