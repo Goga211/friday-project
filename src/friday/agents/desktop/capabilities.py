@@ -15,7 +15,7 @@ import shutil
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from friday.agents.desktop import skills
+from friday.agents.desktop import claude_code, skills
 from friday.shared.protocol import Capability, RiskLevel
 
 Handler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -240,6 +240,32 @@ REGISTRY: dict[str, tuple[Capability, Handler]] = {
             risk=RiskLevel.confirm,
         ),
         skills.lock_screen,
+    ),
+    "run_claude_task": (
+        Capability(
+            name="run_claude_task",
+            description=(
+                "Делегировать сложную многошаговую задачу (код, файлы, длинные сценарии) "
+                "Claude Code на этой машине. params: task — самодостаточное ТЗ со всем "
+                "контекстом (Claude Code не видит этот диалог); cwd — рабочая папка, опц.; "
+                "mode: auto|visible|headless, опц. Задача идёт минуты; в headless результат "
+                "придёт позже отдельным сообщением"
+            ),
+            risk=RiskLevel.confirm,
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "task": _STRING,
+                    "cwd": _STRING,
+                    "mode": {
+                        "type": "string",
+                        "enum": ["auto", "visible", "headless"],
+                    },
+                },
+                "required": ["task"],
+            },
+        ),
+        claude_code.run_claude_task,
     ),
 }
 

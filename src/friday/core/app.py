@@ -31,12 +31,14 @@ from friday.shared.protocol import (
     CapabilityManifest,
     Command,
     ConfirmDecision,
+    Event,
     PendingAction,
     Response,
     RiskLevel,
     UserMessage,
 )
 from friday.shared.topics import (
+    EVENT_WILDCARD,
     PREFIX,
     REGISTRY_WILDCARD,
     RESP_WILDCARD,
@@ -50,6 +52,9 @@ from friday.shared.wol import send_magic_packet
 log = logging.getLogger("friday.core")
 
 CORE_ID = "friday-core"
+
+# Тип события от desktop-агента: итог фоновой задачи Claude Code (см. claude_code.py)
+CLAUDE_TASK_DONE = "claude_task_done"
 
 
 class Core:
@@ -118,6 +123,47 @@ class Core:
             await self._bus_or_raise.publish_model(user_reply_topic(reply_id), reply)
         except aiomqtt.MqttError:
             log.warning("разрыв шины: ответ пользователю (id=%s) не доставлен", reply_id[:8])
+
+    # --- события агентов (фоновые задачи Claude Code и т.п.) ---
+    def _spawn_event(self, payload: bytes) -> None:
+        try:
+            event = Event.model_validate_json(payload)
+        except ValueError:
+            log.warning("некорректное событие на шине, пропускаю")
+            return
+        if event.type != CLAUDE_TASK_DONE:
+            log.debug("событие %s от %s — обработчика нет", event.type, event.source)
+            return
+        task = asyncio.create_task(self._announce_task_result(event))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _announce_task_result(self, event: Event) -> None:
+        """Доставить пользователю итог фоновой задачи Claude Code: контекст + push + голос."""
+        ok = bool(event.data.get("ok"))
+        result = str(event.data.get("result") or "").strip()
+        rec = self.registry.get(event.source)
+        label = (rec.manifest.alias if rec is not None else None) or event.source
+        status = "выполнена" if ok else "завершилась с ошибкой"
+        text = f"Фоновая задача Claude Code на «{label}» {status}."
+        if result:
+            text += f" Итог: {result}"
+
+        # 1) контекст мозга: следующий вопрос «ну что там?» должен видеть итог
+        if self.brain is not None:
+            self.brain.remember("[система] завершилась фоновая задача на ПК", text[:2000])
+        # 2) push на телефон (если настроен)
+        if self.settings.push_url:
+            try:
+                await push_notify(
+                    self.settings.push_url, text[:1500], title="Пятница: задача на ПК"
+                )
+            except Exception as exc:  # noqa: BLE001 — недоставленный push не роняет Core
+                log.warning("push об итоге задачи не доставлен: %s", exc)
+        # 3) голосом (если голосовой агент онлайн; иначе execute вернёт ошибку — не страшно)
+        say = await self.router.execute("say", {"text": text[:600]})
+        if not say.get("ok"):
+            log.info("итог задачи не озвучен: %s", say.get("error"))
 
     # --- обработка запроса пользователя (в отдельной задаче) ---
     def _spawn_user_request(self, payload: bytes) -> None:
@@ -498,7 +544,10 @@ class Core:
             await bus.subscribe(RESP_WILDCARD)
             await bus.subscribe(USER_REQUEST)
             await bus.subscribe(USER_CONFIRM)
-            log.info("Core подключён, слушаю registry + responses + запросы + подтверждения")
+            await bus.subscribe(EVENT_WILDCARD)
+            log.info(
+                "Core подключён, слушаю registry + responses + запросы + подтверждения + события"
+            )
 
             pinger = asyncio.create_task(self._ping_loop())
             try:
@@ -516,6 +565,8 @@ class Core:
                         self._handle_manifest(data)
                     elif topic.startswith(f"{PREFIX}/resp/"):
                         self._handle_response(data)
+                    elif topic.startswith(f"{PREFIX}/event/"):
+                        self._spawn_event(data)
             finally:
                 pinger.cancel()
 

@@ -15,6 +15,7 @@ from friday.shared.protocol import (
     Capability,
     CapabilityManifest,
     ConfirmDecision,
+    Event,
     PendingAction,
     Response,
     RiskLevel,
@@ -298,3 +299,53 @@ async def test_notify_phone_registered_only_with_push_url(
 
     with_url = Core(BusSettings(**base, push_url="https://ntfy.sh/friday-x"))
     assert any(t["name"] == "notify_phone" for t in with_url.router.tool_definitions())
+
+
+# --- события агентов: итог фоновой задачи Claude Code ---
+
+
+def _task_done_event(source: str, *, ok: bool, result: str) -> Event:
+    return Event(
+        source=source,
+        type="claude_task_done",
+        data={"task": "поправь код", "ok": ok, "result": result},
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_done_event_lands_in_brain_context(core: Core) -> None:
+    core.registry.update(CapabilityManifest(device_id="desktop-pc", platform="linux", alias="пк"))
+    brain = _FakeBrain(BrainResult(text="ок"))
+    core.brain = brain  # type: ignore[assignment]
+
+    await core._announce_task_result(_task_done_event("desktop-pc", ok=True, result="готово: 42"))
+
+    assert brain.remembered, "итог задачи не попал в контекст мозга"
+    _user, text = brain.remembered[0]
+    assert "пк" in text and "выполнена" in text and "готово: 42" in text
+
+
+@pytest.mark.asyncio
+async def test_task_done_event_reports_failure(core: Core) -> None:
+    brain = _FakeBrain(BrainResult(text="ок"))
+    core.brain = brain  # type: ignore[assignment]
+
+    await core._announce_task_result(
+        _task_done_event("desktop-pc", ok=False, result="упало на тестах")
+    )
+
+    _user, text = brain.remembered[0]
+    assert "ошибкой" in text and "упало на тестах" in text
+
+
+@pytest.mark.asyncio
+async def test_spawn_event_ignores_unknown_types(core: Core) -> None:
+    event = Event(source="desktop-pc", type="что-то-другое", data={})
+    core._spawn_event(event.model_dump_json().encode())
+    assert not core._tasks, "неизвестное событие не должно порождать задачу"
+
+
+@pytest.mark.asyncio
+async def test_spawn_event_ignores_garbage(core: Core) -> None:
+    core._spawn_event(b"{not json")
+    assert not core._tasks

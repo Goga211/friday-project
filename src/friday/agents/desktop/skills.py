@@ -65,16 +65,24 @@ def _which_first(*names: str) -> str | None:
     return None
 
 
-async def spawn_detached(*argv: str) -> None:
+async def spawn_detached(*argv: str, cwd: str | None = None) -> None:
     """Запустить и забыть (GUI-приложение/браузер), не блокируя агента."""
     if sys.platform == "win32":
         flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
         await asyncio.create_subprocess_exec(
-            *argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags
+            *argv,
+            cwd=cwd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=flags,
         )
         return
     await asyncio.create_subprocess_exec(
-        *argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True
+        *argv,
+        cwd=cwd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 
