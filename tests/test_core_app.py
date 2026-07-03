@@ -284,3 +284,17 @@ async def test_wake_device_is_risky_tool(core: Core) -> None:
     out = await core.router.execute("wake_device", {"device": "пк"}, pending)
     assert out["status"] == "confirmation_required"
     assert pending[0].params == {"device": "пк"}
+
+
+@pytest.mark.asyncio
+async def test_notify_phone_registered_only_with_push_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    base = dict(audit_db=str(tmp_path / "a.db"), scheduler_db=str(tmp_path / "j.db"))
+
+    without = Core(BusSettings(**base, push_url=None))
+    assert all(t["name"] != "notify_phone" for t in without.router.tool_definitions())
+
+    with_url = Core(BusSettings(**base, push_url="https://ntfy.sh/friday-x"))
+    assert any(t["name"] == "notify_phone" for t in with_url.router.tool_definitions())

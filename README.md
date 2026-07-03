@@ -12,21 +12,23 @@
 - **Агенты-исполнители** на устройствах (ПК/ноут/телефон) — выполняют команды, объявляют возможности.
 - Связь — **MQTT** (Mosquitto). Контракт сообщений — `src/friday/shared/protocol.py`.
 
-## Статус: Phase 2 (в работе) — голос
+## Статус: Phase 3 — мультиустройство
 
 Готово:
-- **Phase 0** — монорепо, протокол, шина, реестр устройств, ping/pong, Mosquitto в Docker.
-- **Phase 1 (срез 1)** — мозг (Claude tool-use) в Core: получает запрос → Claude выбирает
-  инструменты (возможности агента) → Core гоняет команды на агента → возвращает ответ.
-  Текстовый CLI, аудит действий (SQLite), лимит шагов агентного цикла. Навыки агента (safe):
-  ping, system_info, notify. Кросс-платформенный агент; реальные навыки управления (launch_app,
-  run_command с allowlist, окна Win32/UIA) — следующий срез.
-- **Phase 2 (срез 1)** — голосовой агент на Hub'е: пайплайн wake-word → запись фразы →
-  облачный STT → мозг → TTS. Всё за swappable-интерфейсами (`SpeechProvider`/`WakeWord`/
-  `TTS`/аудио-I/O), реальные адаптеры — **openWakeWord**, **Yandex SpeechKit**, **Piper**,
-  **sounddevice**; фейки для тестов (пайплайн проверяется без микрофона и облака). Голос
-  переиспользует путь мозга (user/request → user/reply) и объявляет возможность `say`.
-  Живой прогон (микрофон + Yandex Cloud + обученная модель «Пятница») — на стороне пользователя.
+- **Phase 0** — монорепо, протокол, шина, реестр устройств, ping/pong, Mosquitto в Docker (mTLS).
+- **Phase 1** — мозг (Claude tool-use) в Core: запрос → Claude выбирает инструменты
+  (возможности агентов) → Core гоняет команды по шине → ответ. CLI и веб-чат (HUD), аудит и
+  память диалога (SQLite), scheduler (отложенные/cron-действия), флоу подтверждения risky-действий.
+  Кросс-платформенные навыки агента: launch_app, run_command (allowlist), screenshot, open_url,
+  type_text, окна (Win32/wmctrl), notify.
+- **Phase 2** — голосовой агент на Hub'е: wake-word → запись → облачный STT → мозг → TTS.
+  Реальные адаптеры — **openWakeWord**, **Yandex SpeechKit** (STT+TTS v3), **Piper**,
+  **sounddevice**; фейки для тестов; barge-in, голосовое подтверждение. Обучение wake-word
+  «Пятница» — docs/wake-word-training.md.
+- **Phase 3** — мультиустройство: маршрутизация команд по цели («открой на ноутбуке» —
+  алиасы устройств, параметр device, list_devices), персистентный реестр устройств,
+  power management (wake_device по Wake-on-LAN, sleep/shutdown/reboot, lock_screen),
+  iPhone-пульт (REST API HUD для Siri Shortcuts + push через ntfy) — docs/iphone-shortcuts.md.
 
 ## Быстрый старт
 
@@ -42,11 +44,17 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # 3. Поднять брокер MQTT (Mosquitto в Docker)
 make broker
 
-# 4. Три терминала:
+# 4. Терминалы:
 make core         # Core (Hub) — мозг + реестр
 make desktop      # desktop-агент
-make cli          # текстовый чат с Пятницаом
+make cli          # текстовый чат с Пятницей
+make hud          # веб-чат: http://127.0.0.1:8010 (+ REST API для iPhone)
 ```
+
+Несколько устройств: на каждом — свой агент с `FRIDAY_DEVICE_ID` и `FRIDAY_DEVICE_ALIAS`
+(«пк», «ноутбук») в `.env`; дальше «покажи уведомление на ноутбуке» просто работает,
+а выключенный ПК будится фразой «разбуди пк» (Wake-on-LAN; вкл. в BIOS).
+iPhone как пульт (Siri Shortcuts + push) — [docs/iphone-shortcuts.md](docs/iphone-shortcuts.md).
 
 В CLI: `покажи инфо о системе` → Claude вызовет `system_info` на агенте и ответит.
 Без `ANTHROPIC_API_KEY` проверяется только обвязка (Core ответит «мозг недоступен»).
@@ -96,12 +104,13 @@ make fmt         # black + ruff --fix
 
 ```
 src/friday/
-  shared/     # протокол, топики, конфиг, шина MQTT, логирование
-  core/       # Core/Hub: реестр устройств, оркестрация (мозг — в Phase 1)
+  shared/     # протокол, топики, конфиг, шина MQTT, WoL, логирование
+  core/       # Core/Hub: мозг, роутер инструментов, реестр, scheduler, аудит, push
+  hud/        # веб-чат + REST API (iPhone Shortcuts)
   agents/
-    desktop/  # тонкий агент-исполнитель (Linux+Windows)
+    desktop/  # тонкий агент-исполнитель (Linux+Windows): навыки + питание
     voice/    # голосовой агент на Hub'е: wake→STT→мозг→TTS (за swappable-интерфейсами)
 infra/        # Mosquitto (docker-compose), конфиг, gen-certs (mTLS)
-tests/        # юнит-тесты протокола/топиков/диспатча
+tests/        # юнит-тесты (все на фейках, без сети/железа)
 docs/adr/     # архитектурные решения
 ```

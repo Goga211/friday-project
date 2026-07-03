@@ -17,6 +17,7 @@ from anthropic import AsyncAnthropic
 
 from friday.core.audit import AuditLog
 from friday.core.brain import Brain
+from friday.core.push import push_notify
 from friday.core.registry import DeviceRegistry
 from friday.core.router import ToolRouter
 from friday.core.scheduler import ActionScheduler, parse_when
@@ -310,6 +311,16 @@ class Core:
             ),
         }
 
+    async def _tool_notify_phone(self, params: dict[str, object]) -> dict[str, object]:
+        message = str(params.get("message", "")).strip()
+        if not message:
+            raise ValueError("нужен параметр message")
+        raw_title = params.get("title")
+        title = str(raw_title).strip() if raw_title else None
+        assert self.settings.push_url is not None  # инструмент регистрируется только с URL
+        await push_notify(self.settings.push_url, message, title)
+        return {"sent": True}
+
     async def _tool_list_devices(self, params: dict[str, object]) -> dict[str, object]:
         devices: list[dict[str, object]] = []
         for device_id, rec in sorted(self.registry.all().items()):
@@ -353,6 +364,26 @@ class Core:
             ),
             self._tool_wake_device,
         )
+        if self.settings.push_url:
+            self.router.register_local(
+                Capability(
+                    name="notify_phone",
+                    description=(
+                        "Отправить push-уведомление на телефон пользователя "
+                        "(params: message, title — опц.). Работает даже когда ПК выключен"
+                    ),
+                    risk=RiskLevel.safe,
+                    params_schema={
+                        "type": "object",
+                        "properties": {
+                            "message": {"type": "string"},
+                            "title": {"type": "string"},
+                        },
+                        "required": ["message"],
+                    },
+                ),
+                self._tool_notify_phone,
+            )
 
     def _setup_scheduler(self) -> None:
         self._scheduler = ActionScheduler(self.settings.scheduler_db, self._fire_scheduled)

@@ -118,3 +118,95 @@ def test_broken_json_from_client_ignored(client: TestClient) -> None:
         echoed = json.loads(ws.receive_text())
 
         assert echoed["text"] == "живой?"  # битое сообщение не уронило соединение
+
+
+# --- REST API (iPhone Shortcuts) ---
+
+_TOKEN = "test-token-123"
+
+
+class _EchoBus:
+    """Фейковая шина: на запрос тут же «отвечает» через _on_bus_message (как Core)."""
+
+    def __init__(self, hud: HudApp) -> None:
+        self._hud = hud
+
+    async def publish_model(
+        self, topic: str, model: BaseModel, qos: int = 1, retain: bool = False
+    ) -> None:
+        if topic == USER_REQUEST:
+            reply = AssistantReply(
+                correlation_id=model.id,
+                text=f"эхо: {getattr(model, 'text', '')}",
+            )
+        elif topic == USER_CONFIRM:
+            reply = AssistantReply(
+                correlation_id=model.reply_id,
+                text="✓ выполнено" if model.approved else "отменено",
+            )
+        else:
+            return
+        await self._hud._on_bus_message(
+            f"friday/user/reply/{reply.correlation_id}", reply.model_dump_json().encode()
+        )
+
+
+@pytest.fixture()
+def api_client() -> Any:
+    app = create_app(BusSettings(hud_token=_TOKEN), start_bus=False)
+    with TestClient(app) as test_client:
+        hud: HudApp = test_client.app.state.hud  # type: ignore[union-attr]
+        hud._bus = _EchoBus(hud)  # type: ignore[assignment]
+        yield test_client
+
+
+def _auth() -> dict[str, str]:
+    return {"Authorization": f"Bearer {_TOKEN}"}
+
+
+def test_api_message_roundtrip(api_client: TestClient) -> None:
+    resp = api_client.post("/api/message", json={"text": "привет"}, headers=_auth())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["text"] == "эхо: привет"
+    assert body["pending"] == []
+    assert body["reply_id"]
+
+
+def test_api_confirm_roundtrip(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/api/confirm", json={"reply_id": "r-9", "approved": True}, headers=_auth()
+    )
+    assert resp.status_code == 200
+    assert resp.json()["text"] == "✓ выполнено"
+
+
+def test_api_rejects_wrong_token(api_client: TestClient) -> None:
+    resp = api_client.post(
+        "/api/message", json={"text": "x"}, headers={"Authorization": "Bearer wrong"}
+    )
+    assert resp.status_code == 401
+
+
+def test_api_rejects_missing_token(api_client: TestClient) -> None:
+    assert api_client.post("/api/message", json={"text": "x"}).status_code == 401
+
+
+def test_api_disabled_without_configured_token() -> None:
+    # FRIDAY_HUD_TOKEN не задан → API отключён (503), даже с каким-то токеном в запросе
+    app = create_app(BusSettings(hud_token=None), start_bus=False)
+    with TestClient(app) as no_token_client:
+        resp = no_token_client.post("/api/message", json={"text": "x"}, headers=_auth())
+    assert resp.status_code == 503
+
+
+def test_api_empty_text_rejected(api_client: TestClient) -> None:
+    resp = api_client.post("/api/message", json={"text": "  "}, headers=_auth())
+    assert resp.status_code == 422
+
+
+def test_api_message_503_without_bus(api_client: TestClient) -> None:
+    hud: HudApp = api_client.app.state.hud  # type: ignore[union-attr]
+    hud._bus = None
+    resp = api_client.post("/api/message", json={"text": "x"}, headers=_auth())
+    assert resp.status_code == 503
