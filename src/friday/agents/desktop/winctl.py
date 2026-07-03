@@ -150,3 +150,21 @@ def send_text(text: str) -> int:
     if sent != len(events):
         raise RuntimeError(f"SendInput отправил {sent} из {len(events)} событий")
     return len(text)
+
+
+def idle_seconds() -> float:
+    """Секунды с последнего ввода пользователя (GetLastInputInfo)."""
+    if sys.platform != "win32":
+        raise RuntimeError("Win32 API доступно только на Windows")
+    import ctypes
+    from ctypes import wintypes
+
+    class _LastInputInfo(ctypes.Structure):
+        _fields_ = (("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD))
+
+    info = _LastInputInfo()
+    info.cbSize = ctypes.sizeof(_LastInputInfo)
+    if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
+        raise RuntimeError("GetLastInputInfo не сработал")
+    elapsed_ms = ctypes.windll.kernel32.GetTickCount() - info.dwTime
+    return max(0, elapsed_ms) / 1000.0
