@@ -1,4 +1,4 @@
-.PHONY: help venv install install-voice install-hud piper lint fmt typecheck test certs broker broker-down core desktop cli voice hud
+.PHONY: help venv install install-voice install-hud piper lint fmt typecheck test certs broker broker-down core desktop cli voice hud home
 
 VENV := .venv
 PY := $(VENV)/bin/python
@@ -60,3 +60,6 @@ voice:
 
 hud:
 	$(PY) -m friday.hud.app
+
+home:
+	$(PY) -m friday.agents.home.app

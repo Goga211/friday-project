@@ -12,7 +12,7 @@
 - **Агенты-исполнители** на устройствах (ПК/ноут/телефон) — выполняют команды, объявляют возможности.
 - Связь — **MQTT** (Mosquitto). Контракт сообщений — `src/friday/shared/protocol.py`.
 
-## Статус: Phase 3 — мультиустройство
+## Статус: Phase 4 — умный дом
 
 Готово:
 - **Phase 0** — монорепо, протокол, шина, реестр устройств, ping/pong, Mosquitto в Docker (mTLS).
@@ -29,6 +29,10 @@
   алиасы устройств, параметр device, list_devices), персистентный реестр устройств,
   power management (wake_device по Wake-on-LAN, sleep/shutdown/reboot, lock_screen),
   iPhone-пульт (REST API HUD для Siri Shortcuts + push через ntfy) — docs/iphone-shortcuts.md.
+- **Phase 4** — умный дом: агент `friday-home` с интерфейсом `DeviceController`
+  (home_list / home_get_state / home_set_state / home_run_scene). По умолчанию —
+  `MockController` (виртуальные лампы/розетка/сцена, железа не нужно); адаптер
+  **Home Assistant** готов (`FRIDAY_HOME_CONTROLLER=ha` + URL/token) — ADR 0003.
 
 ## Быстрый старт
 
@@ -49,7 +53,11 @@ make core         # Core (Hub) — мозг + реестр
 make desktop      # desktop-агент
 make cli          # текстовый чат с Пятницей
 make hud          # веб-чат: http://127.0.0.1:8010 (+ REST API для iPhone)
+make home         # агент умного дома (mock; с HA: FRIDAY_HOME_CONTROLLER=ha)
 ```
+
+Умный дом без железа: `make home` → «включи свет в спальне», «включи сцену вечер»,
+«что со светом?» — mock-лампы честно меняют состояние.
 
 Несколько устройств: на каждом — свой агент с `FRIDAY_DEVICE_ID` и `FRIDAY_DEVICE_ALIAS`
 («пк», «ноутбук») в `.env`; дальше «покажи уведомление на ноутбуке» просто работает,
@@ -110,6 +118,7 @@ src/friday/
   agents/
     desktop/  # тонкий агент-исполнитель (Linux+Windows): навыки + питание
     voice/    # голосовой агент на Hub'е: wake→STT→мозг→TTS (за swappable-интерфейсами)
+    home/     # умный дом: DeviceController (mock | Home Assistant), сцены
 infra/        # Mosquitto (docker-compose), конфиг, gen-certs (mTLS)
 tests/        # юнит-тесты (все на фейках, без сети/железа)
 docs/adr/     # архитектурные решения

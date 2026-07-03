@@ -56,6 +56,7 @@ friday-desktop = "friday.agents.desktop.app:main"
 friday-cli = "friday.cli.app:main"
 friday-voice = "friday.agents.voice.app:main"
 friday-hud = "friday.hud.app:main"
+friday-home = "friday.agents.home.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/friday"]
