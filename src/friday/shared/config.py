@@ -47,8 +47,9 @@ class BusSettings(BaseSettings):
     llm_model: str = "claude-haiku-4-5"
     llm_max_tokens: int = 2048
     llm_max_iterations: int = 8
-    # Сколько последних реплик диалога держать в контексте мозга (user+assistant вместе)
-    llm_history_max_messages: int = 20
+    # Сколько последних реплик диалога держать в контексте мозга (user+assistant вместе).
+    # 50 ≈ +1200 вх. токенов/запрос к окну 20 — с prompt caching единицы % бюджета (§5.1)
+    llm_history_max_messages: int = 50
 
     # Веб-чат (зачаток HUD): адрес HTTP-сервера
     hud_host: str = "127.0.0.1"

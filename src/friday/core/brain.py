@@ -60,7 +60,7 @@ class Brain:
         max_tokens: int = 2048,
         max_iterations: int = 8,
         system_prompt: str = SYSTEM_PROMPT,
-        history_max_messages: int = 20,
+        history_max_messages: int = 50,
     ) -> None:
         self._client = client
         self._model = model
