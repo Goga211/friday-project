@@ -44,6 +44,7 @@ from friday.shared.topics import (
     cmd_topic,
     user_reply_topic,
 )
+from friday.shared.wol import send_magic_packet
 
 log = logging.getLogger("friday.core")
 
@@ -286,7 +287,29 @@ class Core:
         assert self._scheduler is not None
         return {"jobs": self._scheduler.list_jobs()}
 
-    # --- устройства: обзор для мозга ---
+    # --- устройства: обзор и пробуждение (для мозга) ---
+    async def _tool_wake_device(self, params: dict[str, object]) -> dict[str, object]:
+        name = str(params.get("device", "")).strip()
+        if not name:
+            raise ValueError("нужен параметр device (алиас или id устройства)")
+        record = self.registry.resolve(name)
+        if record is None:
+            raise ValueError(f"неизвестное устройство '{name}' (см. list_devices)")
+        manifest = record.manifest
+        label = manifest.alias or manifest.device_id
+        if manifest.online:
+            return {"already_online": True, "message": f"«{label}» уже онлайн"}
+        if not manifest.mac:
+            raise ValueError(f"у устройства «{label}» нет MAC в манифесте — WoL невозможен")
+        send_magic_packet(manifest.mac, self.settings.wol_broadcast, self.settings.wol_port)
+        return {
+            "sent": True,
+            "message": (
+                f"магический пакет отправлен на «{label}» ({manifest.mac}) — "
+                "устройство появится онлайн через ~1–2 минуты, если WoL включён в BIOS"
+            ),
+        }
+
     async def _tool_list_devices(self, params: dict[str, object]) -> dict[str, object]:
         devices: list[dict[str, object]] = []
         for device_id, rec in sorted(self.registry.all().items()):
@@ -313,6 +336,22 @@ class Core:
                 risk=RiskLevel.safe,
             ),
             self._tool_list_devices,
+        )
+        self.router.register_local(
+            Capability(
+                name="wake_device",
+                description=(
+                    "Разбудить выключенное/спящее устройство по Wake-on-LAN "
+                    "(params: device — алиас или id из list_devices)"
+                ),
+                risk=RiskLevel.confirm,
+                params_schema={
+                    "type": "object",
+                    "properties": {"device": {"type": "string"}},
+                    "required": ["device"],
+                },
+            ),
+            self._tool_wake_device,
         )
 
     def _setup_scheduler(self) -> None:

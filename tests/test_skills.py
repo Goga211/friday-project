@@ -94,3 +94,49 @@ def test_winctl_raises_off_windows() -> None:
 def test_ps_quote_escapes_single_quotes() -> None:
     assert skills.ps_quote("it's") == "'it''s'"
     assert skills.ps_quote("plain") == "'plain'"
+
+
+# --- питание ---
+
+
+def test_power_argv_linux(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(skills, "_SYSTEM", "Linux")
+    assert skills._power_argv("sleep") == ["systemctl", "suspend"]
+    assert skills._power_argv("shutdown") == ["systemctl", "poweroff"]
+    assert skills._power_argv("reboot") == ["systemctl", "reboot"]
+
+
+def test_power_argv_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(skills, "_SYSTEM", "Windows")
+    assert skills._power_argv("sleep") == ["rundll32", "powrprof.dll,SetSuspendState", "0,1,0"]
+    assert skills._power_argv("shutdown") == ["shutdown", "/s", "/t", "0"]
+    assert skills._power_argv("reboot") == ["shutdown", "/r", "/t", "0"]
+
+
+@pytest.mark.asyncio
+async def test_power_rejects_unknown_action() -> None:
+    with pytest.raises(ValueError):
+        await skills.power({"action": "explode"})
+
+
+@pytest.mark.asyncio
+async def test_power_spawns_detached_without_waiting(monkeypatch: pytest.MonkeyPatch) -> None:
+    spawned: list[tuple[str, ...]] = []
+
+    async def _fake_spawn(*argv: str) -> None:
+        spawned.append(argv)
+
+    monkeypatch.setattr(skills, "_SYSTEM", "Linux")
+    monkeypatch.setattr(skills, "spawn_detached", _fake_spawn)
+    out = await skills.power({"action": "sleep"})
+    assert out == {"power": "sleep"}
+    assert spawned == [("systemctl", "suspend")]
+
+
+@pytest.mark.asyncio
+async def test_power_and_lock_unsupported_on_macos(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(skills, "_SYSTEM", "Darwin")
+    with pytest.raises(RuntimeError):
+        await skills.power({"action": "sleep"})
+    with pytest.raises(RuntimeError):
+        await skills.lock_screen({})

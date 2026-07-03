@@ -318,3 +318,47 @@ async def manage_window(params: dict[str, Any]) -> dict[str, Any]:
     for argv in commands:
         await _run_checked(argv, error_prefix=f"wmctrl ({action})")
     return {"window": title, "action": action}
+
+
+# --- питание (Phase 3: power management) ---
+
+_POWER_ACTIONS = ("sleep", "shutdown", "reboot")
+
+
+def _power_argv(action: str) -> list[str]:
+    """Команда управления питанием для текущей ОС (вынесено ради тестируемости)."""
+    if _SYSTEM == "Windows":
+        if action == "sleep":
+            return ["rundll32", "powrprof.dll,SetSuspendState", "0,1,0"]
+        flag = "/s" if action == "shutdown" else "/r"
+        return ["shutdown", flag, "/t", "0"]
+    if _SYSTEM == "Linux":
+        verb = {"sleep": "suspend", "shutdown": "poweroff", "reboot": "reboot"}[action]
+        return ["systemctl", verb]
+    raise _unsupported("power")
+
+
+async def power(params: dict[str, Any]) -> dict[str, Any]:
+    action = str(params.get("action", "")).strip().lower()
+    if action not in _POWER_ACTIONS:
+        raise ValueError(f"action должен быть одним из: {', '.join(_POWER_ACTIONS)}")
+    argv = _power_argv(action)
+    # Запускаем отвязанно и НЕ ждём результата: ответ на команду должен успеть уйти в
+    # шину до того, как машина заснёт/выключится. Если ОС откажет (polkit и т.п.) —
+    # это видно по тому, что устройство осталось онлайн.
+    await spawn_detached(*argv)
+    return {"power": action}
+
+
+async def lock_screen(params: dict[str, Any]) -> dict[str, Any]:
+    if _SYSTEM == "Windows":
+        await _run_checked(["rundll32", "user32.dll,LockWorkStation"], error_prefix="lock_screen")
+        return {"locked": True}
+    if _SYSTEM == "Linux":
+        loginctl = shutil.which("loginctl")
+        if loginctl is None:
+            raise RuntimeError("loginctl недоступен (нужен systemd-logind)")
+        # работает и на Wayland+GNOME — блокировку делает logind, а не X11-инжект
+        await _run_checked([loginctl, "lock-session"], error_prefix="lock_screen")
+        return {"locked": True}
+    raise _unsupported("lock_screen")

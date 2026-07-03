@@ -216,3 +216,71 @@ async def test_fire_scheduled_no_device_logs_not_crashes(core: Core) -> None:
     before = len(_bus(core).published)
     await core._fire_scheduled("", "notify", {})  # устройств нет — команда не отправлена
     assert len(_bus(core).published) == before
+
+
+# --- устройства: list_devices и wake_device ---
+
+
+@pytest.mark.asyncio
+async def test_list_devices_shows_offline_with_alias(core: Core) -> None:
+    manifest = CapabilityManifest(
+        device_id="pc", platform="linux", online=False, alias="пк", mac="AA:BB:CC:DD:EE:FF"
+    )
+    core.registry.update(manifest)
+
+    out = await core.router.execute("list_devices", {})
+    assert out["ok"] is True
+    devices = out["result"]["devices"]
+    assert devices == [
+        {"id": "pc", "alias": "пк", "platform": "linux", "online": False, "capabilities": []}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_wake_device_sends_magic_packet(core: Core, monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, str, int]] = []
+    monkeypatch.setattr(
+        "friday.core.app.send_magic_packet",
+        lambda mac, broadcast, port: sent.append((mac, broadcast, port)),
+    )
+    core.registry.update(
+        CapabilityManifest(
+            device_id="pc", platform="linux", online=False, alias="пк", mac="AA:BB:CC:DD:EE:FF"
+        )
+    )
+
+    out = await core._tool_wake_device({"device": "пк"})
+    assert out["sent"] is True
+    assert sent == [("AA:BB:CC:DD:EE:FF", "255.255.255.255", 9)]
+
+
+@pytest.mark.asyncio
+async def test_wake_device_already_online(core: Core) -> None:
+    core.registry.update(
+        CapabilityManifest(device_id="pc", platform="linux", online=True, alias="пк")
+    )
+    out = await core._tool_wake_device({"device": "пк"})
+    assert out.get("already_online") is True
+
+
+@pytest.mark.asyncio
+async def test_wake_device_errors(core: Core) -> None:
+    with pytest.raises(ValueError, match="неизвестное устройство"):
+        await core._tool_wake_device({"device": "тостер"})
+    core.registry.update(
+        CapabilityManifest(device_id="pc", platform="linux", online=False, alias="пк")
+    )
+    with pytest.raises(ValueError, match="нет MAC"):
+        await core._tool_wake_device({"device": "пк"})
+
+
+@pytest.mark.asyncio
+async def test_wake_device_is_risky_tool(core: Core) -> None:
+    # wake_device — confirm: без подтверждения уходит в pending, параметр device сохраняется.
+    core.registry.update(
+        CapabilityManifest(device_id="pc", platform="linux", online=False, alias="пк")
+    )
+    pending: list[PendingAction] = []
+    out = await core.router.execute("wake_device", {"device": "пк"}, pending)
+    assert out["status"] == "confirmation_required"
+    assert pending[0].params == {"device": "пк"}

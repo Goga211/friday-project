@@ -192,11 +192,9 @@ class ToolRouter:
 
         Параметр device в params (инъектирован в схемы device-backed инструментов) —
         целевое устройство (алиас или id); извлекается здесь и до навыка не доходит.
+        Для локальных инструментов params не трогаем: например, у wake_device параметр
+        device — его собственный аргумент.
         """
-        params = dict(params)
-        raw_target = params.pop("device", None)
-        target = str(raw_target).strip() if raw_target else None
-
         local = self._local.get(action)
         if local is not None:
             local_cap, handler = local
@@ -204,6 +202,9 @@ class ToolRouter:
                 return self._defer(pending, _LOCAL_DEVICE, action, params, local_cap.risk)
             return await self._run_local(action, handler, params)
 
+        params = dict(params)
+        raw_target = params.pop("device", None)
+        target = str(raw_target).strip() if raw_target else None
         device_id, cap, error = self._find_device(action, target)
         if device_id is None or cap is None:
             return {"ok": False, "error": error}

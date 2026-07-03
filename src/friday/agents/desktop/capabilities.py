@@ -212,6 +212,35 @@ REGISTRY: dict[str, tuple[Capability, Handler]] = {
         ),
         skills.manage_window,
     ),
+    "power": (
+        Capability(
+            name="power",
+            description=(
+                "Управление питанием: усыпить/выключить/перезагрузить эту машину "
+                "(params: action: sleep|shutdown|reboot)"
+            ),
+            risk=RiskLevel.dangerous,
+            params_schema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["sleep", "shutdown", "reboot"],
+                    },
+                },
+                "required": ["action"],
+            },
+        ),
+        skills.power,
+    ),
+    "lock_screen": (
+        Capability(
+            name="lock_screen",
+            description="Заблокировать экран",
+            risk=RiskLevel.confirm,
+        ),
+        skills.lock_screen,
+    ),
 }
 
 
