@@ -50,6 +50,8 @@ class BusSettings(BaseSettings):
     # Сколько последних реплик диалога держать в контексте мозга (user+assistant вместе).
     # 50 ≈ +1200 вх. токенов/запрос к окну 20 — с prompt caching единицы % бюджета (§5.1)
     llm_history_max_messages: int = 50
+    # Модель-селектор долгосрочной памяти (recall/forget): дёшево и достаточно
+    llm_memory_model: str = "claude-haiku-4-5"
 
     # Веб-чат (зачаток HUD): адрес HTTP-сервера
     hud_host: str = "127.0.0.1"
