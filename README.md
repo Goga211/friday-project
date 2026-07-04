@@ -38,6 +38,10 @@
 
 Нужно: Python 3.12+, Docker. Если нет pip/venv: `sudo apt install python3-venv python3-pip`.
 
+> **Windows:** `make` нет — те же цели через `.\dev.ps1 <цель>`
+> (например `.\dev.ps1 install`, `.\dev.ps1 test`, `.\dev.ps1 core`).
+> Для брокера нужен Docker Desktop, для генерации сертификатов — Git Bash (идёт с Git).
+
 ```bash
 # 1. Зависимости в venv
 make install

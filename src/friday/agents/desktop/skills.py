@@ -28,8 +28,10 @@ _ALLOWLIST_POSIX = (
     "ls", "cat", "echo", "pwd", "whoami", "date", "uptime",
     "df", "free", "uname", "ps", "which", "env", "hostname",
 )  # fmt: skip
+# echo здесь нет намеренно: на Windows это builtin cmd, а не exe — run_command
+# исполняет только реальные бинарники (без cmd /c: метасимволы ломали бы allowlist)
 _ALLOWLIST_WINDOWS = (
-    "tasklist", "ipconfig", "systeminfo", "hostname", "whoami", "where", "echo",
+    "tasklist", "ipconfig", "systeminfo", "hostname", "whoami", "where",
 )  # fmt: skip
 
 _CMD_TIMEOUT = 15.0

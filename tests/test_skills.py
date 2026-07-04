@@ -25,10 +25,16 @@ async def test_run_command_allowlist_override(monkeypatch: pytest.MonkeyPatch) -
 
 
 @pytest.mark.asyncio
-async def test_run_command_echo_succeeds() -> None:
-    out = await skills.run_command({"command": "echo привет"})
-    assert out["exit_code"] == 0
-    assert "привет" in out["stdout"]
+async def test_run_command_allowed_succeeds() -> None:
+    if platform.system() == "Windows":
+        # echo на Windows — builtin cmd, не exe; whoami — реальный бинарник из allowlist
+        out = await skills.run_command({"command": "whoami"})
+        assert out["exit_code"] == 0
+        assert out["stdout"].strip()
+    else:
+        out = await skills.run_command({"command": "echo привет"})
+        assert out["exit_code"] == 0
+        assert "привет" in out["stdout"]
 
 
 @pytest.mark.asyncio

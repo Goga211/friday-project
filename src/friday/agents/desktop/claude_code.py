@@ -132,7 +132,13 @@ def _kill_tree(proc: asyncio.subprocess.Process) -> None:
     """Убить процесс со всеми потомками: Claude Code плодит дочерние процессы,
     и выжившие внуки держали бы pipe'ы открытыми (proc.wait() бы завис)."""
     if sys.platform == "win32":
-        proc.kill()
+        # голый proc.kill() убил бы только обёртку (cmd/лаунчер), а node-потомки
+        # продолжили бы выполнять задачу; taskkill /T валит всё дерево
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True,
+            check=False,
+        )
         return
     with contextlib.suppress(ProcessLookupError):
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
