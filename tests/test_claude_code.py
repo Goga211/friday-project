@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +27,23 @@ def _fresh_events_queue(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(claude_code, "EVENTS", asyncio.Queue())
 
 
-def _install_fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> None:
-    """Положить исполняемый скрипт `claude` в начало PATH."""
-    script = tmp_path / "claude"
-    script.write_text(f"#!/bin/sh\n{body}\n")
-    script.chmod(script.stat().st_mode | stat.S_IEXEC)
+def _install_fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, py_body: str) -> None:
+    """Положить исполняемый скрипт `claude` в начало PATH.
+
+    Тело — Python (кросс-платформенно). На Windows sh-скрипт без расширения
+    невидим для shutil.which — нашёлся бы НАСТОЯЩИЙ claude, поэтому лаунчер
+    здесь .cmd, а на POSIX — sh-обёртка; оба зовут интерпретатор текущего venv.
+    """
+    impl = tmp_path / "fake_claude.py"
+    impl.write_text(py_body, encoding="utf-8")
+    if sys.platform == "win32":
+        launcher = tmp_path / "claude.cmd"
+        # -X utf8: вывод в pipe в UTF-8 (агент декодирует stdout как UTF-8)
+        launcher.write_text(f'@"{sys.executable}" -X utf8 "{impl}" %*\n', encoding="utf-8")
+    else:
+        launcher = tmp_path / "claude"
+        launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{impl}" "$@"\n')
+        launcher.chmod(launcher.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
 
 
@@ -52,7 +65,7 @@ async def test_rejects_unknown_mode() -> None:
 
 
 async def test_rejects_missing_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_claude(tmp_path, monkeypatch, "exit 0")
+    _install_fake_claude(tmp_path, monkeypatch, "raise SystemExit(0)")
     with pytest.raises(ValueError, match="cwd"):
         await claude_code.run_claude_task({"task": "x", "cwd": str(tmp_path / "нет-такой")})
 
@@ -72,7 +85,7 @@ async def test_headless_success_puts_done_event(
     _install_fake_claude(
         tmp_path,
         monkeypatch,
-        'echo \'{"result": "готово: 42", "is_error": false}\'',
+        'print(\'{"result": "готово: 42", "is_error": false}\')',
     )
     out = await claude_code.run_claude_task({"task": "посчитай", "mode": "headless"})
     assert out["mode"] == "headless"
@@ -88,7 +101,11 @@ async def test_headless_success_puts_done_event(
 async def test_headless_failure_reports_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_fake_claude(tmp_path, monkeypatch, 'echo "всё сломалось" >&2; exit 3')
+    _install_fake_claude(
+        tmp_path,
+        monkeypatch,
+        'import sys\nprint("всё сломалось", file=sys.stderr)\nraise SystemExit(3)',
+    )
     await claude_code.run_claude_task({"task": "x", "mode": "headless"})
     _event_type, data = await _next_event()
     assert data["ok"] is False
@@ -97,7 +114,7 @@ async def test_headless_failure_reports_error(
 
 
 async def test_headless_timeout_kills_task(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_claude(tmp_path, monkeypatch, "sleep 30")
+    _install_fake_claude(tmp_path, monkeypatch, "import time\ntime.sleep(30)")
     monkeypatch.setenv("FRIDAY_CLAUDE_TASK_TIMEOUT", "0.3")
     await claude_code.run_claude_task({"task": "x", "mode": "headless"})
     _event_type, data = await _next_event()
@@ -108,7 +125,7 @@ async def test_headless_timeout_kills_task(tmp_path: Path, monkeypatch: pytest.M
 async def test_headless_non_json_output_kept_raw(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_fake_claude(tmp_path, monkeypatch, 'echo "просто текст"')
+    _install_fake_claude(tmp_path, monkeypatch, 'print("просто текст")')
     await claude_code.run_claude_task({"task": "x", "mode": "headless"})
     _event_type, data = await _next_event()
     assert data["ok"] is True
@@ -121,7 +138,7 @@ async def test_headless_non_json_output_kept_raw(
 async def test_auto_prefers_visible_when_user_active(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_fake_claude(tmp_path, monkeypatch, "exit 0")
+    _install_fake_claude(tmp_path, monkeypatch, "raise SystemExit(0)")
 
     async def _active() -> float | None:
         return 5.0
@@ -144,7 +161,7 @@ async def test_auto_prefers_visible_when_user_active(
 async def test_auto_falls_back_to_headless_when_idle_unknown(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install_fake_claude(tmp_path, monkeypatch, 'echo \'{"result": "ok"}\'')
+    _install_fake_claude(tmp_path, monkeypatch, 'print(\'{"result": "ok"}\')')
 
     async def _unknown() -> float | None:
         return None

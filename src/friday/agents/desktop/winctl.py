@@ -33,7 +33,6 @@ def list_windows() -> list[dict[str, Any]]:
     user32 = ctypes.windll.user32
     found: list[dict[str, Any]] = []
 
-    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
     def _on_window(hwnd: int, _lparam: int) -> bool:
         if not user32.IsWindowVisible(hwnd):
             return True
@@ -46,7 +45,9 @@ def list_windows() -> list[dict[str, Any]]:
             found.append({"hwnd": int(hwnd), "title": buffer.value})
         return True
 
-    user32.EnumWindows(_on_window, 0)
+    # не декоратором: mypy strict считает WINFUNCTYPE(...) нетипизированным декоратором
+    enum_proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(_on_window)
+    user32.EnumWindows(enum_proc, 0)
     return found
 
 
@@ -166,5 +167,5 @@ def idle_seconds() -> float:
     info.cbSize = ctypes.sizeof(_LastInputInfo)
     if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(info)):
         raise RuntimeError("GetLastInputInfo не сработал")
-    elapsed_ms = ctypes.windll.kernel32.GetTickCount() - info.dwTime
+    elapsed_ms = int(ctypes.windll.kernel32.GetTickCount()) - int(info.dwTime)
     return max(0, elapsed_ms) / 1000.0
