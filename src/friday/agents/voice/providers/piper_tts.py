@@ -7,11 +7,11 @@ CLI стабилен между версиями и не тянет тяжёлы
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from friday.agents.voice.config import VoiceSettings
 from friday.agents.voice.interfaces import AudioClip
+from friday.shared import proc
 
 log = logging.getLogger("friday.voice.tts")
 
@@ -25,17 +25,14 @@ class PiperSpeechSynthesizer:
         self._sample_rate = settings.piper_sample_rate
 
     async def synthesize(self, text: str) -> AudioClip:
-        proc = await asyncio.create_subprocess_exec(
+        code, stdout, stderr = await proc.run(
             self._bin,
             "--model",
             self._model,
             "--output_raw",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stdin_data=text.encode(),
         )
-        stdout, stderr = await proc.communicate(text.encode())
-        if proc.returncode != 0:
+        if code != 0:
             detail = stderr.decode()[:200]
-            raise RuntimeError(f"piper завершился с кодом {proc.returncode}: {detail}")
+            raise RuntimeError(f"piper завершился с кодом {code}: {detail}")
         return AudioClip(pcm=stdout, sample_rate=self._sample_rate)

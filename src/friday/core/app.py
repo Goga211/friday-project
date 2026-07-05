@@ -22,6 +22,7 @@ from friday.core.push import push_notify
 from friday.core.registry import DeviceRegistry
 from friday.core.router import ToolRouter
 from friday.core.scheduler import ActionScheduler, parse_when
+from friday.shared import aio
 from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.env import load_env
@@ -685,7 +686,7 @@ async def run() -> None:
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run())
+        aio.run(run())
 
 
 if __name__ == "__main__":

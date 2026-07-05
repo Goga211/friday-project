@@ -27,6 +27,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocke
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from friday.shared import aio
 from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.env import load_env
@@ -285,12 +286,15 @@ def main() -> None:
     setup_logging()
     settings = BusSettings()
     log.info("HUD стартует: http://%s:%s", settings.hud_host, settings.hud_port)
-    uvicorn.run(
+    config = uvicorn.Config(
         create_app(settings),
         host=settings.hud_host,
         port=settings.hud_port,
         log_level="warning",  # свой logging уже настроен, uvicorn не дублирует
     )
+    # не uvicorn.run(): он на Windows принудительно берёт Proactor-луп, на котором
+    # aiomqtt падает — серверим в своём селекторном лупе (см. shared/aio.py)
+    aio.run(uvicorn.Server(config).serve())
 
 
 if __name__ == "__main__":
