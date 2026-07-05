@@ -8,7 +8,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import platform
 from typing import Any
@@ -16,6 +15,7 @@ from typing import Any
 from friday.agents.home.config import HomeSettings
 from friday.agents.home.factory import build_controller
 from friday.agents.home.interfaces import DeviceController, HomeEntity
+from friday.shared import aio
 from friday.shared.agent import CapabilityRegistry, run_capability_agent
 from friday.shared.config import BusSettings
 from friday.shared.logging import setup_logging
@@ -148,7 +148,7 @@ async def run() -> None:
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run())
+        aio.run(run())
 
 
 if __name__ == "__main__":

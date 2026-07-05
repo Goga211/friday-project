@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 
+from friday.shared import aio
 from friday.shared.bus import Bus
 from friday.shared.config import BusSettings
 from friday.shared.protocol import AssistantReply, ConfirmDecision, UserMessage
@@ -75,7 +76,7 @@ async def run() -> None:
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run())
+        aio.run(run())
 
 
 if __name__ == "__main__":

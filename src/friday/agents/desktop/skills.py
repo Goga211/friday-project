@@ -13,13 +13,16 @@ import os
 import platform
 import shlex
 import shutil
-import subprocess
 import sys
 import tempfile
 import time
 from typing import Any
 
 from friday.agents.desktop import winctl
+from friday.shared import proc
+from friday.shared.proc import spawn_detached
+
+__all__ = ["spawn_detached"]  # re-export: его зовут capabilities.py и claude_code.py
 
 _SYSTEM = platform.system()  # 'Linux' | 'Windows' | 'Darwin'
 
@@ -67,34 +70,10 @@ def _which_first(*names: str) -> str | None:
     return None
 
 
-async def spawn_detached(*argv: str, cwd: str | None = None) -> None:
-    """Запустить и забыть (GUI-приложение/браузер), не блокируя агента."""
-    if sys.platform == "win32":
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        await asyncio.create_subprocess_exec(
-            *argv,
-            cwd=cwd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=flags,
-        )
-        return
-    await asyncio.create_subprocess_exec(
-        *argv,
-        cwd=cwd,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-
-
 async def _run_checked(argv: list[str], *, error_prefix: str) -> None:
     """Выполнить утилиту, поднять RuntimeError с её stderr при ненулевом коде выхода."""
-    proc = await asyncio.create_subprocess_exec(
-        *argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
+    code, _, stderr = await proc.run(*argv)
+    if code != 0:
         raise RuntimeError(f"{error_prefix}: {stderr.decode(errors='replace')[:200]}")
 
 
@@ -157,16 +136,12 @@ async def run_command(params: dict[str, Any]) -> dict[str, Any]:
     if exe is None:
         raise RuntimeError(f"'{argv[0]}' не найден в PATH")
 
-    proc = await asyncio.create_subprocess_exec(
-        exe, *argv[1:], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_CMD_TIMEOUT)
+        exit_code, stdout, stderr = await proc.run(exe, *argv[1:], timeout=_CMD_TIMEOUT)
     except TimeoutError as exc:
-        proc.kill()
         raise RuntimeError(f"команда превысила таймаут {_CMD_TIMEOUT:.0f}с") from exc
     return {
-        "exit_code": proc.returncode,
+        "exit_code": exit_code,
         "stdout": stdout.decode(errors="replace")[:4000],
         "stderr": stderr.decode(errors="replace")[:2000],
     }
@@ -268,11 +243,8 @@ async def list_windows(params: dict[str, Any]) -> dict[str, Any]:
     if _SYSTEM != "Linux":
         raise _unsupported("list_windows")
     _require_x11("list_windows")
-    proc = await asyncio.create_subprocess_exec(
-        _wmctrl(), "-l", stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
+    code, stdout, stderr = await proc.run(_wmctrl(), "-l")
+    if code != 0:
         raise RuntimeError(f"wmctrl -l: {stderr.decode(errors='replace')[:200]}")
     titles: list[str] = []
     for line in stdout.decode(errors="replace").splitlines():

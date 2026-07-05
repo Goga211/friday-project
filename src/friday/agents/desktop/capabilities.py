@@ -8,7 +8,6 @@ confirm; run_command — dangerous) — только после подтверж
 
 from __future__ import annotations
 
-import asyncio
 import os
 import platform
 import shutil
@@ -16,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from friday.agents.desktop import claude_code, skills
+from friday.shared import proc
 from friday.shared.protocol import Capability, RiskLevel
 
 Handler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
@@ -67,8 +67,7 @@ async def _notify(params: dict[str, Any]) -> dict[str, Any]:
     notifier = shutil.which("notify-send")
     if notifier is None:
         raise RuntimeError("notify-send недоступен (поставь libnotify-bin)")
-    proc = await asyncio.create_subprocess_exec(notifier, title, message)
-    await proc.wait()
+    await proc.run(notifier, title, message)
     return {"sent": True}
 
 

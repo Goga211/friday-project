@@ -10,16 +10,14 @@ headless — `claude -p` в фоне, результат уезжает собы
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 import shutil
-import signal
-import subprocess
 import sys
 from typing import Any
 
 from friday.agents.desktop import skills, winctl
+from friday.shared import proc
 
 # События завершения фоновых задач: (тип события, данные). Публикует на шину общий
 # рантайм агента (shared/agent.py) — навык сам доступа к шине не имеет.
@@ -57,11 +55,8 @@ def _float_env(name: str, default: float) -> float:
 
 async def _capture(*argv: str) -> str:
     """Выполнить утилиту и вернуть stdout; RuntimeError при ненулевом коде выхода."""
-    proc = await asyncio.create_subprocess_exec(
-        *argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-    )
-    stdout, stderr = await proc.communicate()
-    if proc.returncode != 0:
+    code, stdout, stderr = await proc.run(*argv)
+    if code != 0:
         raise RuntimeError(stderr.decode(errors="replace")[:200])
     return stdout.decode(errors="replace").strip()
 
@@ -128,50 +123,29 @@ async def _spawn_visible(claude: str, task: str, cwd: str | None) -> str:
     )
 
 
-def _kill_tree(proc: asyncio.subprocess.Process) -> None:
-    """Убить процесс со всеми потомками: Claude Code плодит дочерние процессы,
-    и выжившие внуки держали бы pipe'ы открытыми (proc.wait() бы завис)."""
-    if sys.platform == "win32":
-        # голый proc.kill() убил бы только обёртку (cmd/лаунчер), а node-потомки
-        # продолжили бы выполнять задачу; taskkill /T валит всё дерево
-        subprocess.run(
-            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-            capture_output=True,
-            check=False,
-        )
-        return
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-
-
 async def _execute_headless(
     claude: str, task: str, cwd: str | None, timeout: float
 ) -> tuple[bool, str]:
     """Выполнить `claude -p` и вернуть (ok, текст результата/ошибки)."""
-    kwargs: dict[str, Any] = {}
-    if sys.platform != "win32":
-        kwargs["start_new_session"] = True  # своя process group — для _kill_tree
-    proc = await asyncio.create_subprocess_exec(
-        claude,
-        "-p",
-        task,
-        "--output-format",
-        "json",
-        cwd=cwd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        **kwargs,
-    )
     try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        # kill_tree: Claude Code плодит дочерние процессы — по таймауту валим всё дерево,
+        # иначе выжившие внуки продолжили бы задачу и держали pipe'ы открытыми
+        code, stdout, stderr = await proc.run(
+            claude,
+            "-p",
+            task,
+            "--output-format",
+            "json",
+            cwd=cwd,
+            timeout=timeout,
+            kill_tree=True,
+        )
     except TimeoutError:
-        _kill_tree(proc)
-        await proc.wait()  # группа убита, pipe'ы закрыты — зомби не остаётся
         return False, f"задача превысила таймаут {timeout:.0f}с и была остановлена"
     out = stdout.decode(errors="replace").strip()
-    if proc.returncode != 0:
+    if code != 0:
         detail = stderr.decode(errors="replace").strip() or out
-        return False, f"claude завершился с кодом {proc.returncode}: {detail[:500]}"
+        return False, f"claude завершился с кодом {code}: {detail[:500]}"
     try:
         payload = json.loads(out)
         text = str(payload.get("result") or "").strip() or out

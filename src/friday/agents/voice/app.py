@@ -27,6 +27,7 @@ from friday.agents.voice.factory import (
 )
 from friday.agents.voice.interfaces import AudioSink, SpeechSynthesizer
 from friday.agents.voice.pipeline import VoicePipeline
+from friday.shared import aio
 from friday.shared.bus import Bus, run_with_reconnect
 from friday.shared.config import BusSettings
 from friday.shared.logging import setup_logging
@@ -316,7 +317,7 @@ async def run() -> None:
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run())
+        aio.run(run())
 
 
 if __name__ == "__main__":

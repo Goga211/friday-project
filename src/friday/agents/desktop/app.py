@@ -6,12 +6,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import platform
 
 from friday.agents.desktop.capabilities import REGISTRY
 from friday.agents.desktop.claude_code import EVENTS
+from friday.shared import aio
 from friday.shared.agent import run_capability_agent
 from friday.shared.config import BusSettings
 from friday.shared.logging import setup_logging
@@ -32,7 +32,7 @@ async def run() -> None:
 
 def main() -> None:
     with contextlib.suppress(KeyboardInterrupt):
-        asyncio.run(run())
+        aio.run(run())
 
 
 if __name__ == "__main__":
