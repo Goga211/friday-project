@@ -60,15 +60,24 @@ class DeviceRegistry:
         return self._devices.get(device_id)
 
     def resolve(self, name: str) -> DeviceRecord | None:
-        """Найти устройство по device_id или алиасу (без учёта регистра)."""
+        """Найти устройство по device_id или алиасу (без учёта регистра).
+
+        При коллизии алиасов (например, устаревшая запись со старой машины в
+        персистентном реестре) предпочитаем online-устройство, затем самое
+        свежее по last_seen — иначе живой ПК выглядел бы «офлайн».
+        """
         record = self._devices.get(name)
         if record is not None:
             return record
         wanted = name.strip().casefold()
-        for rec in self._devices.values():
-            if rec.manifest.alias is not None and rec.manifest.alias.casefold() == wanted:
-                return rec
-        return None
+        matches = [
+            rec
+            for rec in self._devices.values()
+            if rec.manifest.alias is not None and rec.manifest.alias.casefold() == wanted
+        ]
+        if not matches:
+            return None
+        return max(matches, key=lambda rec: (rec.manifest.online, rec.last_seen))
 
     def online_devices(self) -> list[str]:
         return [d for d, rec in self._devices.items() if rec.manifest.online]

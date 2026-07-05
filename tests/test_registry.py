@@ -1,5 +1,6 @@
 """Реестр устройств: resolve по алиасу и персистентность (SQLite)."""
 
+from datetime import timedelta
 from pathlib import Path
 
 from friday.core.registry import DeviceRegistry
@@ -7,12 +8,15 @@ from friday.shared.net import detect_mac, format_mac
 from friday.shared.protocol import Capability, CapabilityManifest
 
 
-def _manifest(device_id: str, alias: str | None = None, mac: str | None = None):
+def _manifest(
+    device_id: str, alias: str | None = None, mac: str | None = None, online: bool = True
+):
     return CapabilityManifest(
         device_id=device_id,
         platform="linux",
         alias=alias,
         mac=mac,
+        online=online,
         capabilities=[Capability(name="ping", description="живость")],
     )
 
@@ -25,6 +29,30 @@ def test_resolve_by_id_and_alias_case_insensitive() -> None:
     assert resolved is not None
     assert resolved.manifest.device_id == "d1"
     assert reg.resolve("тостер") is None
+
+
+def test_resolve_alias_collision_prefers_online() -> None:
+    # Живой случай 2026-07-05: в персистентном реестре осталась запись со старой
+    # машины с тем же алиасом «пк» — resolve возвращал её (офлайн) вместо живой.
+    reg = DeviceRegistry()
+    reg.update(_manifest("desktop-old", alias="пк", online=False))  # старая — первой
+    reg.update(_manifest("desktop-new", alias="пк", online=True))
+    resolved = reg.resolve("пк")
+    assert resolved is not None
+    assert resolved.manifest.device_id == "desktop-new"
+
+
+def test_resolve_alias_collision_all_offline_prefers_freshest() -> None:
+    reg = DeviceRegistry()
+    reg.update(_manifest("desktop-old", alias="пк", online=False))
+    reg.update(_manifest("desktop-new", alias="пк", online=False))
+    # разводим last_seen явно: часы Windows могут дать одинаковые метки подряд
+    old_record = reg.get("desktop-old")
+    assert old_record is not None
+    old_record.last_seen -= timedelta(minutes=5)
+    resolved = reg.resolve("пк")
+    assert resolved is not None
+    assert resolved.manifest.device_id == "desktop-new"
 
 
 def test_persistent_registry_survives_restart(tmp_path: Path) -> None:
